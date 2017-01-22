@@ -8,9 +8,10 @@ import (
 	"time"
 )
 
-type TimedPacket struct {
-	Timestamp time.Time
+type PacketEvent struct {
 	Packet    gopacket.Packet
+	Timestamp time.Time
+	Reverse   bool
 }
 
 func flowKey(pkt gopacket.Packet) (flow gopacket.Flow, ok bool) {
@@ -29,12 +30,12 @@ func flowKey(pkt gopacket.Packet) (flow gopacket.Flow, ok bool) {
 
 type FlowEntry struct {
 	Key       gopacket.Flow
-	Counters  map[string]int
-	Data      map[string]interface{}
+	Counters  map[int]int
+	Data      map[int]interface{}
 	StartTime time.Time
 	LastTime  time.Time
 
-	packetChannel chan TimedPacket
+	packetChannel chan PacketEvent
 	reapChannel   chan *FlowEntry
 	flowDone      chan struct{}
 }
@@ -48,9 +49,9 @@ func (fe *FlowEntry) Finish() {
 
 type FlowChainFn func(*FlowEntry) bool
 
-type PacketChainFn func(*FlowEntry, gopacket.Packet) bool
+type PacketChainFn func(*FlowEntry, PacketEvent) bool
 
-type LayerChainFn func(*FlowEntry, gopacket.Layer) bool
+type LayerChainFn func(*FlowEntry, PacketEvent, gopacket.Layer) bool
 
 type LayerChainEntry struct {
 	LayerType gopacket.LayerType
@@ -100,39 +101,60 @@ func NewFlowTable() (ft *FlowTable) {
 	return
 }
 
-func (ft *FlowTable) HandlePacket(pkt gopacket.Packet, ci gopacket.CaptureInfo) {
+func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	// advance the packet clock
-	ft.tickPacketClock(ci.Timestamp)
+	timestamp := pkt.Metadata().Timestamp
+	ft.tickPacketClock(timestamp)
 
 	// extract a flow key from the packet
 	flow, ok := flowKey(pkt)
 	if ok {
 		// get a flow entry for the flow key,
 		// and send it the packet for further processing if not ignored.
-		fe := ft.flowEntry(flow)
+		fe, rev := ft.flowEntry(flow)
 		if fe != nil {
-			fe.packetChannel <- TimedPacket{ci.Timestamp, pkt}
+			fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
 		}
 	}
 }
 
-func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry) {
+func (ft *FlowTable) AddInitialFunction(fn PacketChainFn) {
+	ft.InitialChain = append(ft.InitialChain, fn)
+}
+
+func (ft *FlowTable) AddLayerFunction(fn LayerChainFn, layerType gopacket.LayerType) {
+	ft.LayerChain = append(ft.LayerChain, LayerChainEntry{layerType, fn})
+}
+
+func (ft *FlowTable) AddEmitterFunction(fn FlowChainFn) {
+	ft.EmitterChain = append(ft.EmitterChain, fn)
+}
+
+func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 	// First look for a flow entry in the active table
-	var ok bool
 	ft.activeLock.RLock()
-	fe, ok = ft.Active[flow]
+	fe = ft.Active[flow]
 	ft.activeLock.RUnlock()
 
-	if ok {
-		return
+	if fe != nil {
+		return fe, false
+	}
+
+	// Now look for a reverse flow entry
+	ft.activeLock.RLock()
+	fe = ft.Active[flow.Reverse()]
+	ft.activeLock.RUnlock()
+
+	if fe != nil {
+		return fe, true
 	}
 
 	// No entry available. Create a new one.
 	fe = new(FlowEntry)
 	fe.Key = flow
-	fe.Counters = make(map[string]int)
-	fe.Data = make(map[string]interface{})
-	fe.packetChannel = make(chan TimedPacket)
+	fe.Counters = make(map[int]int)
+	fe.Data = make(map[int]interface{})
+	fe.packetChannel = make(chan PacketEvent)
 	fe.reapChannel = ft.reapChannel
 	fe.flowDone = make(chan struct{})
 
@@ -143,19 +165,19 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry) {
 
 		// Run forever. FlowEntry goroutines are shut down by
 		// closing the packet channel.
-		for tpkt := range fe.packetChannel {
+		for pe := range fe.packetChannel {
 
-			if fe.LastTime.Before(tpkt.Timestamp) {
-				fe.LastTime = tpkt.Timestamp
+			if fe.LastTime.Before(pe.Timestamp) {
+				fe.LastTime = pe.Timestamp
 			}
 
 			// The initial function chain is used to set up
 			// state in the FlowEntry to be used by
 			// functions in the layer chain.
 			if initial {
-				fe.StartTime = tpkt.Timestamp
+				fe.StartTime = pe.Timestamp
 				for _, fn := range ft.InitialChain {
-					if !fn(fe, tpkt.Packet) {
+					if !fn(fe, pe) {
 						break
 					}
 				}
@@ -166,9 +188,9 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry) {
 			// called for specified layers in a
 			// specified order
 			for _, le := range ft.LayerChain {
-				layer := tpkt.Packet.Layer(le.LayerType)
+				layer := pe.Packet.Layer(le.LayerType)
 				if layer != nil {
-					if !le.Fn(fe, layer) {
+					if !le.Fn(fe, pe, layer) {
 						break
 					}
 				}
@@ -181,10 +203,10 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry) {
 
 	// Add the flow to the active table
 	ft.activeLock.Lock()
-	fe, ok = ft.Active[flow]
+	ft.Active[flow] = fe
 	ft.activeLock.Unlock()
 
-	return
+	return fe, false
 }
 
 func quantize(tick time.Time, quantum int64) time.Time {
