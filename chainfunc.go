@@ -39,7 +39,7 @@ func ip6OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	return true
 }
 
-func ChainBasicCounters(ft *FlowTable) {
+func (ft *FlowTable) ChainBasicCounters() {
 	ft.AddLayerFunction(packetCount, layers.LayerTypeIPv4)
 	ft.AddLayerFunction(packetCount, layers.LayerTypeIPv6)
 	ft.AddLayerFunction(ip4OctetCount, layers.LayerTypeIPv4)
@@ -89,7 +89,7 @@ func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool 
 	return true
 }
 
-func ChainTCPFinishing(ft *FlowTable) {
+func (ft *FlowTable) ChainTCPFinishing() {
 	ft.AddInitialFunction(tcpFinStateInit)
 	ft.AddLayerFunction(tcpFinStateTrack, layers.LayerTypeTCP)
 }
