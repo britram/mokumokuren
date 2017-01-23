@@ -53,7 +53,7 @@ type PacketChainFn func(*FlowEntry, PacketEvent) bool
 
 type LayerChainFn func(*FlowEntry, PacketEvent, gopacket.Layer) bool
 
-type LayerChainEntry struct {
+type layerChainEntry struct {
 	LayerType gopacket.LayerType
 	Fn        LayerChainFn
 }
@@ -62,19 +62,21 @@ type LayerChainEntry struct {
 type FlowTable struct {
 	// Function chain to run on the first packet in any given flow.
 	// Used to set up state for subsequent chains
-	InitialChain []PacketChainFn
+	initialChain []PacketChainFn
 
 	// Function chain to run for each layer of each incoming packet
-	LayerChain []LayerChainEntry
+	layerChain []layerChainEntry
 
 	// Function chain to run on concluded flows
-	EmitterChain []FlowChainFn
+	emitterChain []FlowChainFn
 
 	// The current time as of the last packet added to the flow
-	PacketClock time.Time
+	packetClock time.Time
 
 	// Currently active flows, maps a flow key to a flow entry.
-	Active     map[gopacket.Flow]*FlowEntry
+	active map[gopacket.Flow]*FlowEntry
+
+	// Lock guarding access to the active table
 	activeLock sync.RWMutex
 
 	// Channel for flow entries to be reaped from the active queue
@@ -86,10 +88,10 @@ type FlowTable struct {
 
 func NewFlowTable() (ft *FlowTable) {
 	ft = new(FlowTable)
-	ft.InitialChain = make([]PacketChainFn, 1)
-	ft.LayerChain = make([]LayerChainEntry, 4)
-	ft.EmitterChain = make([]FlowChainFn, 1)
-	ft.Active = make(map[gopacket.Flow]*FlowEntry)
+	ft.initialChain = make([]PacketChainFn, 1)
+	ft.layerChain = make([]layerChainEntry, 4)
+	ft.emitterChain = make([]FlowChainFn, 1)
+	ft.active = make(map[gopacket.Flow]*FlowEntry)
 	ft.reapChannel = make(chan *FlowEntry)
 
 	// start the flow table's emitter
@@ -104,7 +106,7 @@ func NewFlowTable() (ft *FlowTable) {
 func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	// advance the packet clock
 	timestamp := pkt.Metadata().Timestamp
-	ft.tickPacketClock(timestamp)
+	ft.tickpacketClock(timestamp)
 
 	// extract a flow key from the packet
 	flow, ok := flowKey(pkt)
@@ -119,21 +121,21 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 }
 
 func (ft *FlowTable) AddInitialFunction(fn PacketChainFn) {
-	ft.InitialChain = append(ft.InitialChain, fn)
+	ft.initialChain = append(ft.initialChain, fn)
 }
 
 func (ft *FlowTable) AddLayerFunction(fn LayerChainFn, layerType gopacket.LayerType) {
-	ft.LayerChain = append(ft.LayerChain, LayerChainEntry{layerType, fn})
+	ft.layerChain = append(ft.layerChain, layerChainEntry{layerType, fn})
 }
 
 func (ft *FlowTable) AddEmitterFunction(fn FlowChainFn) {
-	ft.EmitterChain = append(ft.EmitterChain, fn)
+	ft.emitterChain = append(ft.emitterChain, fn)
 }
 
 func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 	// First look for a flow entry in the active table
 	ft.activeLock.RLock()
-	fe = ft.Active[flow]
+	fe = ft.active[flow]
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
@@ -142,7 +144,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 
 	// Now look for a reverse flow entry
 	ft.activeLock.RLock()
-	fe = ft.Active[flow.Reverse()]
+	fe = ft.active[flow.Reverse()]
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
@@ -176,7 +178,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 			// functions in the layer chain.
 			if initial {
 				fe.StartTime = pe.Timestamp
-				for _, fn := range ft.InitialChain {
+				for _, fn := range ft.initialChain {
 					if !fn(fe, pe) {
 						break
 					}
@@ -187,7 +189,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 			// The layer chain contains functions to be
 			// called for specified layers in a
 			// specified order
-			for _, le := range ft.LayerChain {
+			for _, le := range ft.layerChain {
 				layer := pe.Packet.Layer(le.LayerType)
 				if layer != nil {
 					if !le.Fn(fe, pe, layer) {
@@ -203,7 +205,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 
 	// Add the flow to the active table
 	ft.activeLock.Lock()
-	ft.Active[flow] = fe
+	ft.active[flow] = fe
 	ft.activeLock.Unlock()
 
 	return fe, false
@@ -215,13 +217,13 @@ func quantize(tick time.Time, quantum int64) time.Time {
 
 const BIN_QUANTUM = 10
 
-func (ft *FlowTable) tickPacketClock(tick time.Time) {
-	if ft.PacketClock.After(tick) {
+func (ft *FlowTable) tickpacketClock(tick time.Time) {
+	if ft.packetClock.After(tick) {
 		return
 	}
 
-	lastClock := ft.PacketClock
-	ft.PacketClock = tick
+	lastClock := ft.packetClock
+	ft.packetClock = tick
 
 	// generate ticks for reapIdleFlowEntries
 	for i, j := quantize(lastClock, BIN_QUANTUM), quantize(tick, BIN_QUANTUM); i.Before(j); i = i.Add(BIN_QUANTUM * time.Second) {
@@ -242,7 +244,7 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 	for fe := range ft.reapChannel {
 		// remove the flow from the active table
 		ft.activeLock.Lock()
-		delete(ft.Active, fe.Key)
+		delete(ft.active, fe.Key)
 		ft.activeLock.Unlock()
 
 		// close the packet channel
@@ -252,7 +254,7 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 		_ = <-fe.flowDone
 
 		// now run the emitter chain
-		for _, fn := range ft.EmitterChain {
+		for _, fn := range ft.emitterChain {
 			if !fn(fe) {
 				break
 			}
