@@ -43,7 +43,9 @@ func (q *IdleQueue) Tick(k FlowKey, t time.Time) {
 
 		// and stitch it to the front
 		n.older = q.newest
-		n.older.newer = n
+		if n.older != nil {
+			n.older.newer = n
+		}
 		n.newer = nil
 		q.newest = n
 	} else {
@@ -52,7 +54,9 @@ func (q *IdleQueue) Tick(k FlowKey, t time.Time) {
 		n.time = t
 		n.key = k
 		n.older = q.newest
-		n.older.newer = n
+		if n.older != nil {
+			n.older.newer = n
+		}
 		q.newest = n
 	}
 }

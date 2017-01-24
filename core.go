@@ -4,6 +4,7 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"log"
+	"net"
 	"sync"
 	"time"
 )
@@ -17,6 +18,18 @@ type PacketEvent struct {
 type FlowKey struct {
 	l3, l4 gopacket.Flow
 	proto  layers.IPProtocol
+}
+
+func NewFlowKey(sip net.IP, dip net.IP, sp uint16, dp uint16, proto layers.IPProtocol) (k FlowKey) {
+	k.l3, _ = gopacket.FlowFromEndpoints(layers.NewIPEndpoint(sip), layers.NewIPEndpoint(dip))
+	switch proto {
+	case layers.IPProtocolTCP:
+		k.l4, _ = gopacket.FlowFromEndpoints(layers.NewTCPPortEndpoint(layers.TCPPort(sp)), layers.NewTCPPortEndpoint(layers.TCPPort(dp)))
+	case layers.IPProtocolUDP:
+		k.l4, _ = gopacket.FlowFromEndpoints(layers.NewUDPPortEndpoint(layers.UDPPort(sp)), layers.NewUDPPortEndpoint(layers.UDPPort(dp)))
+	}
+	k.proto = proto
+	return
 }
 
 func (k FlowKey) Reverse() FlowKey {
