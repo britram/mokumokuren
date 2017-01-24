@@ -1,16 +1,14 @@
 package mokumokuren
 
 import (
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
-
 	"testing"
+	"time"
 )
 
 var BASE_TIME time.Time
 
-func TestIdleQueue(r *testing.T) {
-	basetime := time.Parse("2006-01-02 15:04:05 -0700", "2009-02-20 15:00:00 +0000")
+func TestIdleQueue(t *testing.T) {
+	basetime, _ := time.Parse("2006-01-02 15:04:05 -0700", "2009-02-20 15:00:00 +0000")
 	endtime := basetime // add something to the basetime to get a reasonable endtime
 
 	flowtimes := []struct {
