@@ -2,7 +2,7 @@ package mokumokuren
 
 import (
 	"github.com/google/gopacket"
-	_ "github.com/google/gopacket/layers"
+	"github.com/google/gopacket/layers"
 	"log"
 	"sync"
 	"time"
@@ -14,22 +14,37 @@ type PacketEvent struct {
 	Reverse   bool
 }
 
-func flowKey(pkt gopacket.Packet) (flow gopacket.Flow, ok bool) {
-	t := pkt.TransportLayer()
-	if t != nil {
-		return t.TransportFlow(), true
-	}
+type FlowKey struct {
+	l3, l4 gopacket.Flow
+	proto  layers.IPProtocol
+}
+
+func (k FlowKey) Reverse() FlowKey {
+	return FlowKey{k.l3.Reverse(), k.l4.Reverse(), k.proto}
+}
+
+func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	n := pkt.NetworkLayer()
 	if n != nil {
-		return n.NetworkFlow(), true
+		k.l3 = n.NetworkFlow()
+		t := pkt.TransportLayer()
+		if t != nil {
+			k.l4 = t.TransportFlow()
+		}
+		switch n.(type) {
+		case *layers.IPv4:
+			k.proto = n.(*layers.IPv4).Protocol
+		case *layers.IPv6:
+			k.proto = n.(*layers.IPv6).NextHeader
+		default:
+			k.proto = 255
+		}
 	}
-
-	// FIXME add ICMP parsing
-	return gopacket.Flow{}, false
+	return
 }
 
 type FlowEntry struct {
-	Key       gopacket.Flow
+	Key       FlowKey
 	Counters  map[int]int
 	Data      map[int]interface{}
 	StartTime time.Time
@@ -74,7 +89,7 @@ type FlowTable struct {
 	packetClock time.Time
 
 	// Currently active flows, maps a flow key to a flow entry.
-	active map[gopacket.Flow]*FlowEntry
+	active map[FlowKey]*FlowEntry
 
 	// Lock guarding access to the active table
 	activeLock sync.RWMutex
@@ -91,7 +106,7 @@ func NewFlowTable() (ft *FlowTable) {
 	ft.initialChain = make([]PacketChainFn, 1)
 	ft.layerChain = make([]layerChainEntry, 4)
 	ft.emitterChain = make([]FlowChainFn, 1)
-	ft.active = make(map[gopacket.Flow]*FlowEntry)
+	ft.active = make(map[FlowKey]*FlowEntry)
 	ft.reapChannel = make(chan *FlowEntry)
 
 	// start the flow table's emitter
@@ -109,14 +124,12 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	ft.tickpacketClock(timestamp)
 
 	// extract a flow key from the packet
-	flow, ok := flowKey(pkt)
-	if ok {
-		// get a flow entry for the flow key,
-		// and send it the packet for further processing if not ignored.
-		fe, rev := ft.flowEntry(flow)
-		if fe != nil {
-			fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
-		}
+	k := ExtractFlowKey(pkt)
+	// get a flow entry for the flow key,
+	// and send it the packet for further processing if not ignored.
+	fe, rev := ft.flowEntry(k)
+	if fe != nil {
+		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
 	}
 }
 
@@ -132,10 +145,10 @@ func (ft *FlowTable) AddEmitterFunction(fn FlowChainFn) {
 	ft.emitterChain = append(ft.emitterChain, fn)
 }
 
-func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
+func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	// First look for a flow entry in the active table
 	ft.activeLock.RLock()
-	fe = ft.active[flow]
+	fe = ft.active[key]
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
@@ -144,7 +157,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 
 	// Now look for a reverse flow entry
 	ft.activeLock.RLock()
-	fe = ft.active[flow.Reverse()]
+	fe = ft.active[key.Reverse()]
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
@@ -153,7 +166,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 
 	// No entry available. Create a new one.
 	fe = new(FlowEntry)
-	fe.Key = flow
+	fe.Key = key
 	fe.Counters = make(map[int]int)
 	fe.Data = make(map[int]interface{})
 	fe.packetChannel = make(chan PacketEvent)
@@ -205,7 +218,7 @@ func (ft *FlowTable) flowEntry(flow gopacket.Flow) (fe *FlowEntry, rev bool) {
 
 	// Add the flow to the active table
 	ft.activeLock.Lock()
-	ft.active[flow] = fe
+	ft.active[key] = fe
 	ft.activeLock.Unlock()
 
 	return fe, false

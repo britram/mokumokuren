@@ -1,36 +1,45 @@
 package mokumokuren
 
 import (
-	"github.com/google/gopacket"
+	"sync"
 	"time"
 )
 
 type idleQueueNode struct {
 	newer, older *idleQueueNode
 	time         time.Time
-	key          gopacket.Flow
+	key          FlowKey
 }
+
+// An idle queue associates flow keys with the time of the
+// last packet seen, and allows quick access to the least recently active flow.
 
 type IdleQueue struct {
 	newest, oldest *idleQueueNode
-	node           map[gopacket.Flow]*idleQueueNode
+	node           map[FlowKey]*idleQueueNode
+	lock           sync.RWMutex
 }
 
+// Create a new idle queue.
 func NewIdleQueue() *IdleQueue {
 	q := new(IdleQueue)
-	q.node = make(map[gopacket.Flow]*idleQueueNode)
+	q.node = make(map[FlowKey]*idleQueueNode)
 	return q
 }
 
-func (q *IdleQueue) Tick(k gopacket.Flow, t time.Time) {
+func (q *IdleQueue) Tick(k FlowKey, t time.Time) {
 
 	if n, ok := q.node[k]; ok {
 		// remove node from present location in queue
 		n.newer.older = n.older
 		n.older.newer = n.newer
 
-		// update its time
-		n.time = t
+		// update its time, maintaining monotonic invariant
+		if t.After(q.newest.time) {
+			n.time = t
+		} else {
+			n.time = q.newest.time
+		}
 
 		// and stitch it to the front
 		n.older = q.newest
@@ -46,21 +55,24 @@ func (q *IdleQueue) Tick(k gopacket.Flow, t time.Time) {
 		n.older.newer = n
 		q.newest = n
 	}
-
 }
 
-func (q *IdleQueue) NextIdleBefore(t time.Time) (f gopacket.Flow, ok bool) {
+// Remove and return the next
+
+func (q *IdleQueue) NextIdleBefore(t time.Time) (k FlowKey, ok bool) {
 	if q.oldest != nil && q.oldest.time.Before(t) {
+		n := q.oldest
 		q.oldest = q.oldest.newer
 		if q.oldest != nil {
 			q.oldest.older = nil
 		}
-		return f, true
+		return n.key, true
 	} else {
-		return gopacket.Flow{}, false
+		return FlowKey{}, false
 	}
 }
 
+// Get the time associated with the least recently active flow.
 func (q *IdleQueue) OldestFlowTime() time.Time {
 	if q.oldest != nil {
 		return q.oldest.time
