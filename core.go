@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -149,12 +150,18 @@ func NewFlowTable() (ft *FlowTable) {
 }
 
 func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
+	log.Println("in HandlePacket")
+
 	// advance the packet clock
 	timestamp := pkt.Metadata().Timestamp
 	ft.tickPacketClock(timestamp)
 
+	log.Printf("current packet time is %v", ft.packetClock)
+
 	// extract a flow key from the packet
 	k := ExtractFlowKey(pkt)
+
+	log.Printf("HP flow key is  %v", k)
 
 	// get a flow entry for the flow key, tick the idle queue,
 	// and send it the packet for further processing if not ignored.
@@ -205,6 +212,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
+		log.Printf("found forward flow entry %v", fe)
 		return fe, false
 	}
 
@@ -214,6 +222,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
+		log.Printf("found reverse flow entry %v", fe)
 		return fe, true
 	}
 
@@ -225,6 +234,8 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	fe.packetChannel = make(chan PacketEvent)
 	fe.reapChannel = ft.reapChannel
 	fe.flowDone = make(chan struct{})
+
+	log.Printf("created new flow entry %v", fe)
 
 	// Now start running the function chain for this flow entry
 	// in its own goroutine
@@ -273,6 +284,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
+	log.Printf("added new flow entry %v", fe)
 
 	return fe, false
 }
@@ -299,6 +311,8 @@ func (ft *FlowTable) tickPacketClock(tick time.Time) {
 }
 
 func (ft *FlowTable) reapIdleFlowEntries() {
+	log.Println("idle reaper up")
+
 	for tick := range ft.tickChannel {
 		endtime := tick.Add(IDLE_TIMEOUT * time.Second)
 		for {
@@ -310,9 +324,12 @@ func (ft *FlowTable) reapIdleFlowEntries() {
 			}
 		}
 	}
+	log.Println("idle reaper down")
 }
 
 func (ft *FlowTable) reapFinishedFlowEntries() {
+	log.Println("finished reaper up")
+
 	for k := range ft.reapChannel {
 		// get the flow
 		ft.activeLock.RLock()
@@ -340,4 +357,6 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 
 	// signal done
 	close(ft.reaperDone)
+
+	log.Println("finished reaper down")
 }
