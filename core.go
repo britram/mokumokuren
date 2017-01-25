@@ -132,9 +132,9 @@ type FlowTable struct {
 
 func NewFlowTable() (ft *FlowTable) {
 	ft = new(FlowTable)
-	ft.initialChain = make([]PacketChainFn, 1)
-	ft.layerChain = make([]layerChainEntry, 4)
-	ft.emitterChain = make([]FlowChainFn, 1)
+	ft.initialChain = make([]PacketChainFn, 0)
+	ft.layerChain = make([]layerChainEntry, 0)
+	ft.emitterChain = make([]FlowChainFn, 0)
 	ft.active = make(map[FlowKey]*FlowEntry)
 	ft.reapChannel = make(chan FlowKey)
 	ft.reaperDone = make(chan struct{})
@@ -195,14 +195,17 @@ func (ft *FlowTable) Shutdown() {
 
 func (ft *FlowTable) AddInitialFunction(fn PacketChainFn) {
 	ft.initialChain = append(ft.initialChain, fn)
+	log.Printf("initialChain now %v", ft.initialChain)
 }
 
 func (ft *FlowTable) AddLayerFunction(fn LayerChainFn, layerType gopacket.LayerType) {
 	ft.layerChain = append(ft.layerChain, layerChainEntry{layerType, fn})
+	log.Printf("layerChain now %v", ft.layerChain)
 }
 
 func (ft *FlowTable) AddEmitterFunction(fn FlowChainFn) {
 	ft.emitterChain = append(ft.emitterChain, fn)
+	log.Printf("emitterChain now %v", ft.emitterChain)
 }
 
 func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
