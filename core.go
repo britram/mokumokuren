@@ -300,11 +300,19 @@ func (ft *FlowTable) tickPacketClock(tick time.Time) {
 		return
 	}
 
-	lastClock := ft.packetClock
+	var lastClock time.Time
+	if ft.packetClock.After(time.Time{}) {
+		lastClock = ft.packetClock
+	} else {
+		lastClock = tick
+		log.Printf("initializing packet clock %v", tick)
+	}
+
 	ft.packetClock = tick
 
 	// generate ticks for reapIdleFlowEntries
 	for i, j := quantize(lastClock, BIN_QUANTUM), quantize(tick, BIN_QUANTUM); i.Before(j); i = i.Add(BIN_QUANTUM * time.Second) {
+		log.Printf("ticking to %v", i)
 		ft.tickChannel <- i
 	}
 
