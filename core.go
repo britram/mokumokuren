@@ -1,9 +1,9 @@
 package mokumokuren
 
 import (
+	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
-	"log"
 	"net"
 	"sync"
 	"time"
@@ -56,15 +56,19 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	return
 }
 
+// FIXME: consider making FlowEntry an interface
+// and add a factory instead of doing runtime typing here.
+// ...runtime typing is kind of pythonic...
 type FlowEntry struct {
-	Key       FlowKey
+	Key FlowKey
+
 	Counters  map[int]int
 	Data      map[int]interface{}
 	StartTime time.Time
 	LastTime  time.Time
 
 	packetChannel chan PacketEvent
-	reapChannel   chan *FlowEntry
+	reapChannel   chan FlowKey
 	flowDone      chan struct{}
 }
 
@@ -72,7 +76,12 @@ type FlowEntry struct {
 // on the last packet of the flow, or by an idle flow reaper.
 
 func (fe *FlowEntry) Finish() {
-	fe.reapChannel <- fe
+	fe.reapChannel <- fe.Key
+}
+
+func (fe *FlowEntry) String() string {
+	// FIXME this gets fixed when moving to statically typed flow entries
+	return fmt.Sprintf("%v", *fe)
 }
 
 type FlowChainFn func(*FlowEntry) bool
@@ -85,6 +94,8 @@ type layerChainEntry struct {
 	LayerType gopacket.LayerType
 	Fn        LayerChainFn
 }
+
+const IDLE_TIMEOUT = 30
 
 // Contains the set of currently active flows
 type FlowTable struct {
@@ -104,11 +115,15 @@ type FlowTable struct {
 	// Currently active flows, maps a flow key to a flow entry.
 	active map[FlowKey]*FlowEntry
 
+	// Idle queue
+	idleq IdleQueue
+
 	// Lock guarding access to the active table
 	activeLock sync.RWMutex
 
 	// Channel for flow entries to be reaped from the active queue
-	reapChannel chan *FlowEntry
+	reapChannel chan FlowKey
+	reaperDone  chan struct{}
 
 	// Channel for packet clock ticks
 	tickChannel chan time.Time
@@ -120,7 +135,9 @@ func NewFlowTable() (ft *FlowTable) {
 	ft.layerChain = make([]layerChainEntry, 4)
 	ft.emitterChain = make([]FlowChainFn, 1)
 	ft.active = make(map[FlowKey]*FlowEntry)
-	ft.reapChannel = make(chan *FlowEntry)
+	ft.reapChannel = make(chan FlowKey)
+	ft.reaperDone = make(chan struct{})
+	ft.tickChannel = make(chan time.Time)
 
 	// start the flow table's emitter
 	go ft.reapFinishedFlowEntries()
@@ -134,16 +151,39 @@ func NewFlowTable() (ft *FlowTable) {
 func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	// advance the packet clock
 	timestamp := pkt.Metadata().Timestamp
-	ft.tickpacketClock(timestamp)
+	ft.tickPacketClock(timestamp)
 
 	// extract a flow key from the packet
 	k := ExtractFlowKey(pkt)
-	// get a flow entry for the flow key,
+
+	// get a flow entry for the flow key, tick the idle queue,
 	// and send it the packet for further processing if not ignored.
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
+		ft.idleq.Tick(k, timestamp)
 		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
 	}
+}
+
+func (ft *FlowTable) Shutdown() {
+
+	ft.activeLock.RLock()
+	keylist := make([]FlowKey, len(ft.active))
+	for k := range ft.active {
+		keylist = append(keylist, k)
+	}
+	ft.activeLock.RUnlock()
+
+	for _, k := range keylist {
+		ft.reapChannel <- k
+	}
+
+	// Shut down the reapers
+	close(ft.tickChannel)
+	close(ft.reapChannel)
+
+	// and wait
+	_ = <-ft.reaperDone
 }
 
 func (ft *FlowTable) AddInitialFunction(fn PacketChainFn) {
@@ -243,7 +283,7 @@ func quantize(tick time.Time, quantum int64) time.Time {
 
 const BIN_QUANTUM = 10
 
-func (ft *FlowTable) tickpacketClock(tick time.Time) {
+func (ft *FlowTable) tickPacketClock(tick time.Time) {
 	if ft.packetClock.After(tick) {
 		return
 	}
@@ -260,17 +300,28 @@ func (ft *FlowTable) tickpacketClock(tick time.Time) {
 
 func (ft *FlowTable) reapIdleFlowEntries() {
 	for tick := range ft.tickChannel {
-		log.Printf("%s", tick)
-		// FIXME call fe.Finish() on idle flows
-		// once we figure out the best way to do LRU
+		endtime := tick.Add(IDLE_TIMEOUT * time.Second)
+		for {
+			k, ok := ft.idleq.NextIdleBefore(endtime)
+			if ok {
+				ft.reapChannel <- k
+			} else {
+				break
+			}
+		}
 	}
 }
 
 func (ft *FlowTable) reapFinishedFlowEntries() {
-	for fe := range ft.reapChannel {
+	for k := range ft.reapChannel {
+		// get the flow
+		ft.activeLock.RLock()
+		fe := ft.active[k]
+		ft.activeLock.RUnlock()
+
 		// remove the flow from the active table
 		ft.activeLock.Lock()
-		delete(ft.active, fe.Key)
+		delete(ft.active, k)
 		ft.activeLock.Unlock()
 
 		// close the packet channel
@@ -286,4 +337,7 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 			}
 		}
 	}
+
+	// signal done
+	close(ft.reaperDone)
 }
