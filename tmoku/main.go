@@ -24,7 +24,7 @@ func main() {
 
 	// add an emitter that just prints flows
 	ft.AddEmitterFunction(func(fe *mokumokuren.FlowEntry) bool {
-		log.Printf("%s", fe.String())
+		log.Printf("EMIT FLOW %s", fe.String())
 		return true
 	})
 

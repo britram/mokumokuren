@@ -6,6 +6,7 @@ import (
 	"github.com/google/gopacket/layers"
 	"log"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -20,6 +21,10 @@ type PacketEvent struct {
 type FlowKey struct {
 	l3, l4 gopacket.Flow
 	proto  layers.IPProtocol
+}
+
+func (key FlowKey) String() string {
+	return key.l3.String() + " " + key.l4.String() + " " + strconv.Itoa(int(key.proto))
 }
 
 func NewFlowKey(sip net.IP, dip net.IP, sp uint16, dp uint16, proto layers.IPProtocol) (k FlowKey) {
@@ -152,8 +157,6 @@ func NewFlowTable() (ft *FlowTable) {
 }
 
 func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
-	log.Println("in HandlePacket")
-
 	// advance the packet clock
 	timestamp := pkt.Metadata().Timestamp
 	ft.tickPacketClock(timestamp)
@@ -162,8 +165,6 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 
 	// extract a flow key from the packet
 	k := ExtractFlowKey(pkt)
-
-	log.Printf("HP flow key is  %v", k)
 
 	// get a flow entry for the flow key, tick the idle queue,
 	// and send it the packet for further processing if not ignored.
@@ -217,7 +218,6 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
-		log.Printf("found forward flow entry for key %v", key)
 		return fe, false
 	}
 
@@ -227,7 +227,6 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
-		log.Printf("found reverse flow entry for key %v", key)
 		return fe, true
 	}
 
@@ -240,8 +239,6 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	fe.reapChannel = ft.reapChannel
 	fe.flowFinishing = make(chan struct{})
 	fe.flowDone = make(chan struct{})
-
-	log.Printf("created new flow entry %v", fe)
 
 	// Now start running the function chain for this flow entry
 	// in its own goroutine
@@ -294,7 +291,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	log.Printf("added new flow entry for key %v", key)
+	log.Printf("added new flow entry for key %s", key.String())
 
 	return fe, false
 }
