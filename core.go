@@ -14,6 +14,7 @@ type PacketEvent struct {
 	Packet    gopacket.Packet
 	Timestamp time.Time
 	Reverse   bool
+	Finish    bool
 }
 
 type FlowKey struct {
@@ -70,6 +71,7 @@ type FlowEntry struct {
 
 	packetChannel chan PacketEvent
 	reapChannel   chan FlowKey
+	flowFinishing chan struct{}
 	flowDone      chan struct{}
 }
 
@@ -168,7 +170,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
 		ft.idleq.Tick(k, timestamp)
-		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
+		fe.packetChannel <- PacketEvent{pkt, timestamp, rev, false}
 	}
 }
 
@@ -215,7 +217,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
-		log.Printf("found forward flow entry %v", fe)
+		log.Printf("found forward flow entry for key %v", key)
 		return fe, false
 	}
 
@@ -225,7 +227,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.RUnlock()
 
 	if fe != nil {
-		log.Printf("found reverse flow entry %v", fe)
+		log.Printf("found reverse flow entry for key %v", key)
 		return fe, true
 	}
 
@@ -236,6 +238,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	fe.Data = make(map[int]interface{})
 	fe.packetChannel = make(chan PacketEvent)
 	fe.reapChannel = ft.reapChannel
+	fe.flowFinishing = make(chan struct{})
 	fe.flowDone = make(chan struct{})
 
 	log.Printf("created new flow entry %v", fe)
@@ -248,6 +251,10 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 		// Run forever. FlowEntry goroutines are shut down by
 		// closing the packet channel.
 		for pe := range fe.packetChannel {
+
+			if pe.Finish {
+				break
+			}
 
 			if fe.LastTime.Before(pe.Timestamp) {
 				fe.LastTime = pe.Timestamp
@@ -287,7 +294,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	log.Printf("added new flow entry %v", fe)
+	log.Printf("added new flow entry for key %v", key)
 
 	return fe, false
 }
@@ -352,10 +359,10 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 		delete(ft.active, k)
 		ft.activeLock.Unlock()
 
-		// close the packet channel
-		close(fe.packetChannel)
+		// signal flow's goroutine to complete by sending a fake finish packet
+		fe.packetChannel <- PacketEvent{nil, ft.packetClock, false, true}
 
-		// wait for flow's goroutine to complete
+		// and wait for it to do so
 		_ = <-fe.flowDone
 
 		// now run the emitter chain
