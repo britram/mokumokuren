@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const CQLEN = 64
+
 type PacketEvent struct {
 	Packet    gopacket.Packet
 	Timestamp time.Time
@@ -24,6 +26,7 @@ type FlowKey struct {
 }
 
 func (key FlowKey) String() string {
+	// FIXME make this prettier
 	return key.l3.String() + " " + key.l4.String() + " " + strconv.Itoa(int(key.proto))
 }
 
@@ -143,7 +146,7 @@ func NewFlowTable() (ft *FlowTable) {
 	ft.layerChain = make([]layerChainEntry, 0)
 	ft.emitterChain = make([]FlowChainFn, 0)
 	ft.active = make(map[FlowKey]*FlowEntry)
-	ft.reapChannel = make(chan FlowKey)
+	ft.reapChannel = make(chan FlowKey, CQLEN)
 	ft.reaperDone = make(chan struct{})
 	ft.tickChannel = make(chan time.Time)
 
@@ -161,8 +164,6 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	timestamp := pkt.Metadata().Timestamp
 	ft.tickPacketClock(timestamp)
 
-	log.Printf("current packet time is %v", ft.packetClock)
-
 	// extract a flow key from the packet
 	k := ExtractFlowKey(pkt)
 
@@ -177,12 +178,16 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 
 func (ft *FlowTable) Shutdown() {
 
+	log.Printf("in shutdown")
+
 	ft.activeLock.RLock()
 	keylist := make([]FlowKey, len(ft.active))
 	for k := range ft.active {
 		keylist = append(keylist, k)
 	}
 	ft.activeLock.RUnlock()
+
+	log.Printf("reaping %u keys", len(keylist))
 
 	for _, k := range keylist {
 		ft.reapChannel <- k
@@ -245,43 +250,44 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	go func() {
 		initial := true
 
-		// Run forever. FlowEntry goroutines are shut down by
-		// closing the packet channel.
-		for pe := range fe.packetChannel {
+		// Run until we get a finishing signal.
+		for {
+			select {
+			case pe := <-fe.packetChannel:
+				if fe.LastTime.Before(pe.Timestamp) {
+					fe.LastTime = pe.Timestamp
+				}
 
-			if pe.Finish {
+				// The initial function chain is used to set up
+				// state in the FlowEntry to be used by
+				// functions in the layer chain.
+				if initial {
+					fe.StartTime = pe.Timestamp
+					for _, fn := range ft.initialChain {
+						if !fn(fe, pe) {
+							break
+						}
+					}
+					initial = false
+				}
+
+				// The layer chain contains functions to be
+				// called for specified layers in a
+				// specified order
+				for _, le := range ft.layerChain {
+					layer := pe.Packet.Layer(le.LayerType)
+					if layer != nil {
+						if !le.Fn(fe, pe, layer) {
+							break
+						}
+					}
+				}
+			case <-fe.flowFinishing:
 				break
 			}
-
-			if fe.LastTime.Before(pe.Timestamp) {
-				fe.LastTime = pe.Timestamp
-			}
-
-			// The initial function chain is used to set up
-			// state in the FlowEntry to be used by
-			// functions in the layer chain.
-			if initial {
-				fe.StartTime = pe.Timestamp
-				for _, fn := range ft.initialChain {
-					if !fn(fe, pe) {
-						break
-					}
-				}
-				initial = false
-			}
-
-			// The layer chain contains functions to be
-			// called for specified layers in a
-			// specified order
-			for _, le := range ft.layerChain {
-				layer := pe.Packet.Layer(le.LayerType)
-				if layer != nil {
-					if !le.Fn(fe, pe, layer) {
-						break
-					}
-				}
-			}
 		}
+
+		log.Printf("flowroutine for key %v exiting", fe.Key)
 
 		// let the reaper know we're done
 		close(fe.flowDone)
@@ -291,7 +297,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	log.Printf("added new flow entry for key %s", key.String())
+	//log.Printf("added new flow entry for key %s", key.String())
 
 	return fe, false
 }
@@ -356,8 +362,8 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 		delete(ft.active, k)
 		ft.activeLock.Unlock()
 
-		// signal flow's goroutine to complete by sending a fake finish packet
-		fe.packetChannel <- PacketEvent{nil, ft.packetClock, false, true}
+		// signal flow's goroutine to complete
+		fe.flowFinishing <- struct{}{}
 
 		// and wait for it to do so
 		_ = <-fe.flowDone
