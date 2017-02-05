@@ -30,7 +30,7 @@ type FlowKey struct {
 
 // Return a string representation of this FlowKey suitable for printing
 func (key FlowKey) String() string {
-	return fmt.Sprintf("%s:%u -> %s:%u %u", key.Sip, key.Dip, key.Sp, key.Dp, key.P)
+	return fmt.Sprintf("%s:%d -> %s:%d %d", key.Sip, key.Sp, key.Dip, key.Dp, key.P)
 }
 
 // Return the reverse of this FlowKey,
@@ -221,12 +221,19 @@ func NewFlowTable() (ft *FlowTable) {
 }
 
 func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
+	var emptyFlowKey FlowKey
+
 	// advance the packet clock
 	timestamp := pkt.Metadata().Timestamp
 	ft.tickPacketClock(timestamp)
 
 	// extract a flow key from the packet
 	k := ExtractFlowKey(pkt)
+
+	// drop packets with the zero key
+	if k == emptyFlowKey {
+		return
+	}
 
 	// get a flow entry for the flow key, tick the idle queue,
 	// and send it the packet for further processing if not ignored.
@@ -358,7 +365,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	//log.Printf("added new flow entry for key %s", key.String())
+	log.Printf("added new flow entry for key %s", key.String())
 
 	return fe, false
 }
