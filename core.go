@@ -5,8 +5,8 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"log"
-	"net"
-	"strconv"
+	//"net"
+	//"strconv"
 	"sync"
 	"time"
 )
@@ -21,48 +21,109 @@ type PacketEvent struct {
 }
 
 type FlowKey struct {
-	l3, l4 gopacket.Flow
-	proto  layers.IPProtocol
+	Sip string // FIXME this is a stupid hack but net.IP isn't comparable
+	Dip string // FIXME this is a stupid hack but net.IP isn't comparable
+	Sp  uint16
+	Dp  uint16
+	P   uint8
 }
 
+// Return a string representation of this FlowKey suitable for printing
 func (key FlowKey) String() string {
-	// FIXME make this prettier
-	return key.l3.String() + " " + key.l4.String() + " " + strconv.Itoa(int(key.proto))
+	return fmt.Sprintf("%s:%u -> %s:%u %u", key.Sip, key.Dip, key.Sp, key.Dp, key.P)
 }
 
-func NewFlowKey(sip net.IP, dip net.IP, sp uint16, dp uint16, proto layers.IPProtocol) (k FlowKey) {
-	k.l3, _ = gopacket.FlowFromEndpoints(layers.NewIPEndpoint(sip), layers.NewIPEndpoint(dip))
-	switch proto {
-	case layers.IPProtocolTCP:
-		k.l4, _ = gopacket.FlowFromEndpoints(layers.NewTCPPortEndpoint(layers.TCPPort(sp)), layers.NewTCPPortEndpoint(layers.TCPPort(dp)))
-	case layers.IPProtocolUDP:
-		k.l4, _ = gopacket.FlowFromEndpoints(layers.NewUDPPortEndpoint(layers.UDPPort(sp)), layers.NewUDPPortEndpoint(layers.UDPPort(dp)))
-	}
-	k.proto = proto
-	return
-}
-
+// Return the reverse of this FlowKey,
+// with source and destination address and port flipped.
 func (k FlowKey) Reverse() FlowKey {
-	return FlowKey{k.l3.Reverse(), k.l4.Reverse(), k.proto}
+	return FlowKey{k.Dip, k.Sip, k.Dp, k.Sp, k.P}
 }
 
+// Extract a flow key from a packet
 func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
-	n := pkt.NetworkLayer()
-	if n != nil {
-		k.l3 = n.NetworkFlow()
-		t := pkt.TransportLayer()
-		if t != nil {
-			k.l4 = t.TransportFlow()
-		}
-		switch n.(type) {
-		case *layers.IPv4:
-			k.proto = n.(*layers.IPv4).Protocol
-		case *layers.IPv6:
-			k.proto = n.(*layers.IPv6).NextHeader
-		default:
-			k.proto = 255
+	nl := pkt.NetworkLayer()
+	if nl == nil {
+		// ain't nobody got time for non-IP packets. empty flow key.
+		return
+	}
+
+	switch nl.(type) {
+	case *layers.IPv4:
+		k.Sip = nl.(*layers.IPv4).SrcIP.String()
+		k.Dip = nl.(*layers.IPv4).SrcIP.String()
+		k.P = uint8(nl.(*layers.IPv4).Protocol)
+	case *layers.IPv6:
+		k.Sip = nl.(*layers.IPv6).SrcIP.String()
+		k.Dip = nl.(*layers.IPv6).SrcIP.String()
+		k.P = uint8(nl.(*layers.IPv6).NextHeader)
+	default:
+		// um i got nothing, empty flow key.
+		return
+	}
+
+	tl := pkt.TransportLayer()
+	if tl == nil {
+		// no transport layer, so try to decode ICMP
+		if icmpl := pkt.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); icmpl != nil {
+			icmptype := icmpl.TypeCode.Type()
+			if icmptype == layers.ICMPv4TypeDestinationUnreachable ||
+				icmptype == layers.ICMPv4TypeTimeExceeded ||
+				icmptype == layers.ICMPv4TypeParameterProblem {
+				// Account ICMPv4 messages from routers to the
+				// reverse flow they belong to
+				sk := ExtractFlowKey(gopacket.NewPacket(icmpl.LayerPayload(),
+					layers.LayerTypeIPv4,
+					gopacket.Default))
+				k.Sip = sk.Dip
+				k.Sp = sk.Dp
+				k.P = sk.P
+			} else {
+				k.Sp = uint16(icmpl.TypeCode.Type())
+				k.Dp = uint16(icmpl.TypeCode.Code())
+			}
+		} else if icmpl := pkt.Layer(layers.LayerTypeICMPv6).(*layers.ICMPv6); icmpl != nil {
+			icmptype := icmpl.TypeCode.Type()
+			if icmptype == layers.ICMPv6TypeDestinationUnreachable ||
+				icmptype == layers.ICMPv6TypeTimeExceeded ||
+				icmptype == layers.ICMPv6TypePacketTooBig ||
+				icmptype == layers.ICMPv6TypeParameterProblem {
+				// Account ICMPv6 messages from routers to the
+				// reverse flow they belong to
+				sk := ExtractFlowKey(gopacket.NewPacket(icmpl.LayerPayload(),
+					layers.LayerTypeIPv6,
+					gopacket.Default))
+				k.Sip = sk.Dip
+				k.Sp = sk.Dp
+				k.P = sk.P
+			} else {
+				k.Sp = uint16(icmpl.TypeCode.Type())
+				k.Dp = uint16(icmpl.TypeCode.Code())
+			}
+		} else {
+			// no icmp, no transport, no ports for you
+			return
 		}
 	}
+
+	switch tl.(type) {
+	case *layers.TCP:
+		k.Sp = uint16(tl.(*layers.TCP).SrcPort)
+		k.Dp = uint16(tl.(*layers.TCP).DstPort)
+	case *layers.UDP:
+		k.Sp = uint16(tl.(*layers.UDP).SrcPort)
+		k.Dp = uint16(tl.(*layers.UDP).DstPort)
+	case *layers.UDPLite:
+		k.Sp = uint16(tl.(*layers.UDPLite).SrcPort)
+		k.Dp = uint16(tl.(*layers.UDPLite).DstPort)
+	case *layers.SCTP:
+		k.Sp = uint16(tl.(*layers.SCTP).SrcPort)
+		k.Dp = uint16(tl.(*layers.SCTP).DstPort)
+	default:
+		// no transport layer we know about, so no ports.
+		return
+	}
+
+	// key set
 	return
 }
 
@@ -187,10 +248,10 @@ func (ft *FlowTable) Shutdown() {
 	}
 	ft.activeLock.RUnlock()
 
-	log.Printf("reaping %u keys", len(keylist))
-
 	for _, k := range keylist {
 		ft.reapChannel <- k
+		log.Printf("reaped %v", k)
+
 	}
 
 	// Shut down the reapers
