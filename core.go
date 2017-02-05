@@ -49,12 +49,12 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 
 	switch nl.(type) {
 	case *layers.IPv4:
-		k.Sip = nl.(*layers.IPv4).SrcIP.String()
-		k.Dip = nl.(*layers.IPv4).DstIP.String()
+		k.Sip = nl.(*layers.IPv4).SrcIP.String() // FIXME eww eww hack
+		k.Dip = nl.(*layers.IPv4).DstIP.String() // FIXME eww eww hack
 		k.P = uint8(nl.(*layers.IPv4).Protocol)
 	case *layers.IPv6:
-		k.Sip = nl.(*layers.IPv6).SrcIP.String()
-		k.Dip = nl.(*layers.IPv6).DstIP.String()
+		k.Sip = nl.(*layers.IPv6).SrcIP.String() // FIXME eww eww hack
+		k.Dip = nl.(*layers.IPv6).DstIP.String() // FIXME eww eww hack
 		k.P = uint8(nl.(*layers.IPv6).NextHeader)
 	default:
 		// um i got nothing, empty flow key.
@@ -320,7 +320,8 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 		initial := true
 
 		// Run until we get a finishing signal.
-		for {
+		running := true
+		for running {
 			select {
 			case pe := <-fe.packetChannel:
 				if fe.LastTime.Before(pe.Timestamp) {
@@ -352,7 +353,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 					}
 				}
 			case <-fe.flowFinishing:
-				break
+				running = false
 			}
 		}
 
@@ -426,6 +427,11 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 		fe := ft.active[k]
 		ft.activeLock.RUnlock()
 
+		if fe == nil {
+			log.Printf("**** duplicate reap of %v ****", k)
+			continue
+		}
+
 		// remove the flow from the active table
 		ft.activeLock.Lock()
 		delete(ft.active, k)
@@ -433,9 +439,12 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 
 		// signal flow's goroutine to complete
 		fe.flowFinishing <- struct{}{}
+		log.Printf("reaper waiting %v to finish", k)
 
 		// and wait for it to do so
 		_ = <-fe.flowDone
+
+		log.Printf("reaper emitting %v", k)
 
 		// now run the emitter chain
 		for _, fn := range ft.emitterChain {
