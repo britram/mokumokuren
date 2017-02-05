@@ -50,11 +50,11 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	switch nl.(type) {
 	case *layers.IPv4:
 		k.Sip = nl.(*layers.IPv4).SrcIP.String()
-		k.Dip = nl.(*layers.IPv4).SrcIP.String()
+		k.Dip = nl.(*layers.IPv4).DstIP.String()
 		k.P = uint8(nl.(*layers.IPv4).Protocol)
 	case *layers.IPv6:
 		k.Sip = nl.(*layers.IPv6).SrcIP.String()
-		k.Dip = nl.(*layers.IPv6).SrcIP.String()
+		k.Dip = nl.(*layers.IPv6).DstIP.String()
 		k.P = uint8(nl.(*layers.IPv6).NextHeader)
 	default:
 		// um i got nothing, empty flow key.
@@ -127,9 +127,9 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	return
 }
 
-// FIXME: consider making FlowEntry an interface
+// FIXME: make FlowEntry an interface
 // and add a factory instead of doing runtime typing here.
-// ...runtime typing is kind of pythonic...
+
 type FlowEntry struct {
 	Key FlowKey
 
@@ -250,15 +250,16 @@ func (ft *FlowTable) Shutdown() {
 
 	ft.activeLock.RLock()
 	keylist := make([]FlowKey, len(ft.active))
+	i := 0
 	for k := range ft.active {
-		keylist = append(keylist, k)
+		keylist[i] = k
+		i++
 	}
 	ft.activeLock.RUnlock()
 
 	for _, k := range keylist {
 		ft.reapChannel <- k
-		log.Printf("reaped %v", k)
-
+		log.Printf("reaped %v on shutdown", k)
 	}
 
 	// Shut down the reapers
@@ -365,7 +366,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	log.Printf("added new flow entry for key %s", key.String())
+	log.Printf("added new flow entry for key %s", fe.Key.String())
 
 	return fe, false
 }
