@@ -36,10 +36,7 @@ func main() {
 	ft.ChainTCPFinishing()
 
 	// add an emitter that just prints flows
-	ft.AddEmitterFunction(func(fe *mokumokuren.FlowEntry) bool {
-		log.Printf("EMIT FLOW %s", fe.String())
-		return true
-	})
+	ft.AddEmitterFunction(mokumokuren.BasicLogEmitter)
 
 	handle, err := pcap.OpenOffline(*fileflag)
 	if err != nil {

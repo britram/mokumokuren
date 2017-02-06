@@ -3,12 +3,13 @@ package mokumokuren
 import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
+	"log"
 )
 
-const FwdOctCount = 0x0001
-const FwdPktCount = 0x0002
-const RevOctCount = 0x0003
-const RevPktCount = 0x0004
+const FwdOctCount = 1
+const FwdPktCount = 2
+const RevOctCount = 3
+const RevPktCount = 4
 
 func packetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	if pe.Reverse {
@@ -24,7 +25,7 @@ func ip4OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	if pe.Reverse {
 		fe.Counters[RevOctCount] += int(ip.Length)
 	} else {
-		fe.Counters[RevOctCount] += int(ip.Length)
+		fe.Counters[FwdOctCount] += int(ip.Length)
 	}
 	return true
 }
@@ -34,7 +35,7 @@ func ip6OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	if pe.Reverse {
 		fe.Counters[RevOctCount] += int(ip.Length)
 	} else {
-		fe.Counters[RevOctCount] += int(ip.Length)
+		fe.Counters[FwdOctCount] += int(ip.Length)
 	}
 	return true
 }
@@ -46,9 +47,10 @@ func (ft *FlowTable) ChainBasicCounters() {
 	ft.AddLayerFunction(ip6OctetCount, layers.LayerTypeIPv6)
 }
 
-const TCPFinStateData = 0x0005
+const TCPFinStateData = 5
 
 type TCPFinState struct {
+	rstseen  [2]bool
 	finseen  [2]bool
 	finacked [2]bool
 	finseq   [2]uint32
@@ -70,7 +72,9 @@ func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool 
 	}
 
 	if tcp.RST {
+		state.rstseen[fwd] = true
 		fe.Finish()
+		return false
 	}
 
 	if tcp.FIN {
@@ -84,6 +88,7 @@ func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool 
 
 	if state.finacked[fwd] && state.finacked[rev] {
 		fe.Finish()
+		return false
 	}
 
 	return true
@@ -92,4 +97,23 @@ func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool 
 func (ft *FlowTable) ChainTCPFinishing() {
 	ft.AddInitialFunction(tcpFinStateInit)
 	ft.AddLayerFunction(tcpFinStateTrack, layers.LayerTypeTCP)
+}
+
+func BasicLogEmitter(fe *FlowEntry) bool {
+	var flowstate string
+	if fe.Data[TCPFinStateData].(TCPFinState).finacked[0] && fe.Data[TCPFinStateData].(TCPFinState).finacked[1] {
+		flowstate = "FIN"
+	} else if fe.Data[TCPFinStateData].(TCPFinState).finacked[0] || fe.Data[TCPFinStateData].(TCPFinState).finacked[1] {
+		flowstate = "half-FIN"
+	} else if fe.Data[TCPFinStateData].(TCPFinState).rstseen[0] || fe.Data[TCPFinStateData].(TCPFinState).rstseen[1] {
+		flowstate = "RST"
+	} else {
+		flowstate = "idle"
+	}
+
+	log.Printf("%v (%d/%d -> %d/%d) %s", fe.Key,
+		fe.Counters[FwdOctCount], fe.Counters[FwdPktCount],
+		fe.Counters[RevOctCount], fe.Counters[RevPktCount],
+		flowstate)
+	return true
 }

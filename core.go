@@ -5,8 +5,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"log"
-	//"net"
-	//"strconv"
 	"sync"
 	"time"
 )
@@ -17,7 +15,6 @@ type PacketEvent struct {
 	Packet    gopacket.Packet
 	Timestamp time.Time
 	Reverse   bool
-	Finish    bool
 }
 
 type FlowKey struct {
@@ -240,7 +237,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
 		ft.idleq.Tick(k, timestamp)
-		fe.packetChannel <- PacketEvent{pkt, timestamp, rev, false}
+		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
 	}
 }
 
