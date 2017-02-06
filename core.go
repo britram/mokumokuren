@@ -243,7 +243,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 
 func (ft *FlowTable) Shutdown() {
 
-	log.Printf("in shutdown")
+	//log.Printf("in shutdown")
 
 	ft.activeLock.RLock()
 	keylist := make([]FlowKey, len(ft.active))
@@ -256,7 +256,7 @@ func (ft *FlowTable) Shutdown() {
 
 	for _, k := range keylist {
 		ft.reapChannel <- k
-		log.Printf("reaped %v on shutdown", k)
+		//log.Printf("reaped %v on shutdown", k)
 	}
 
 	// Shut down the reapers
@@ -354,7 +354,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 			}
 		}
 
-		log.Printf("flowroutine for key %v exiting", fe.Key)
+		//log.Printf("flowroutine for key %v exiting", fe.Key)
 
 		// let the reaper know we're done
 		close(fe.flowDone)
@@ -364,7 +364,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	ft.activeLock.Lock()
 	ft.active[key] = fe
 	ft.activeLock.Unlock()
-	log.Printf("added new flow entry for key %s", fe.Key.String())
+	//log.Printf("added new flow entry for key %s", fe.Key.String())
 
 	return fe, false
 }
@@ -436,12 +436,12 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 
 		// signal flow's goroutine to complete
 		fe.flowFinishing <- struct{}{}
-		log.Printf("reaper waiting %v to finish", k)
+		//log.Printf("reaper waiting %v to finish", k)
 
 		// and wait for it to do so
 		_ = <-fe.flowDone
 
-		log.Printf("reaper emitting %v", k)
+		//log.Printf("reaper emitting %v", k)
 
 		// now run the emitter chain
 		for _, fn := range ft.emitterChain {

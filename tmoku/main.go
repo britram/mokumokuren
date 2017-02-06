@@ -51,8 +51,6 @@ func main() {
 		ft.HandlePacket(pkt)
 	}
 
-	log.Printf("******************** after packet iterator ***********************")
-
 	// at EOF, flush the flowtable
 	ft.Shutdown()
 }
