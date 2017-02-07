@@ -22,3 +22,9 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+# packet test data
+*.pcap
+
+# binaries
+tmoku/tmoku
