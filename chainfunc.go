@@ -2,9 +2,11 @@ package mokumokuren
 
 import (
 	"encoding/binary"
+	"fmt"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"log"
+	"strings"
 	"time"
 )
 
@@ -119,28 +121,6 @@ func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool 
 func (ft *FlowTable) ChainTCPFinishing() {
 	ft.AddInitialFunction(tcpFinStateInit)
 	ft.AddLayerFunction(tcpFinStateTrack, layers.LayerTypeTCP)
-}
-
-// Emitter chain function to print flow records with basic
-// count and FIN state data to the log
-
-func BasicLogEmitter(fe *FlowEntry) bool {
-	var flowstate string
-	if fe.Data[TCPFinStateData].(tcpFinState).finacked[0] && fe.Data[TCPFinStateData].(tcpFinState).finacked[1] {
-		flowstate = "FIN"
-	} else if fe.Data[TCPFinStateData].(tcpFinState).finacked[0] || fe.Data[TCPFinStateData].(tcpFinState).finacked[1] {
-		flowstate = "half-FIN"
-	} else if fe.Data[TCPFinStateData].(tcpFinState).rstseen[0] || fe.Data[TCPFinStateData].(tcpFinState).rstseen[1] {
-		flowstate = "RST"
-	} else {
-		flowstate = "idle"
-	}
-
-	log.Printf("%v (%d/%d -> %d/%d) %s", fe.Key,
-		fe.Counters[FwdOctCount], fe.Counters[FwdPktCount],
-		fe.Counters[RevOctCount], fe.Counters[RevPktCount],
-		flowstate)
-	return true
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -294,4 +274,47 @@ func tcpRttTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 func (ft *FlowTable) ChainTCPRTT() {
 	ft.AddInitialFunction(tcpRttInit)
 	ft.AddLayerFunction(tcpRttTrack, layers.LayerTypeTCP)
+}
+
+///////////////////////////////////////////////////////////////////////
+//
+// Basic emitters
+//
+///////////////////////////////////////////////////////////////////////f
+
+// Emitter chain function to print flow records containing
+// information from the provided chains to the log
+
+func BasicLogEmitter(fe *FlowEntry) bool {
+
+	additional := make([]string, 0)
+
+	// try to get rtt data
+	rv := fe.Data[TCPRTTData]
+	if rv != nil {
+		est := rv.(tcpRttEstimator)
+		additional = append(additional, fmt.Sprintf("rtt %d ms", est.val/1000))
+	}
+
+	// try to get fin state data for a flow end reason
+	fv := fe.Data[TCPFinStateData]
+	if fv != nil {
+		fs := fv.(tcpFinState)
+		if fs.finacked[0] && fs.finacked[1] {
+			additional = append(additional, "FIN")
+		} else if fs.finacked[0] || fs.finacked[1] {
+			additional = append(additional, "half-FIN")
+		} else if fs.rstseen[0] || fs.rstseen[1] {
+			additional = append(additional, "RST")
+		} else {
+			additional = append(additional, "idle")
+		}
+
+	}
+
+	log.Printf("%v (%d/%d -> %d/%d) %s", fe.Key,
+		fe.Counters[FwdOctCount], fe.Counters[FwdPktCount],
+		fe.Counters[RevOctCount], fe.Counters[RevPktCount],
+		strings.Join(additional, " "))
+	return true
 }
