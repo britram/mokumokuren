@@ -2,11 +2,12 @@ package mokumokuren
 
 import (
 	"fmt"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"log"
 	"sync"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 const CQLEN = 64
@@ -61,7 +62,8 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	tl := pkt.TransportLayer()
 	if tl == nil {
 		// no transport layer, so try to decode ICMP
-		if icmpl := pkt.Layer(layers.LayerTypeICMPv4).(*layers.ICMPv4); icmpl != nil {
+		if micmpl := pkt.Layer(layers.LayerTypeICMPv4); micmpl != nil {
+			icmpl := micmpl.(*layers.ICMPv4)
 			icmptype := icmpl.TypeCode.Type()
 			if icmptype == layers.ICMPv4TypeDestinationUnreachable ||
 				icmptype == layers.ICMPv4TypeTimeExceeded ||
@@ -78,7 +80,8 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 				k.Sp = uint16(icmpl.TypeCode.Type())
 				k.Dp = uint16(icmpl.TypeCode.Code())
 			}
-		} else if icmpl := pkt.Layer(layers.LayerTypeICMPv6).(*layers.ICMPv6); icmpl != nil {
+		} else if micmpl := pkt.Layer(layers.LayerTypeICMPv6); micmpl != nil {
+			icmpl := micmpl.(*layers.ICMPv6)
 			icmptype := icmpl.TypeCode.Type()
 			if icmptype == layers.ICMPv6TypeDestinationUnreachable ||
 				icmptype == layers.ICMPv6TypeTimeExceeded ||

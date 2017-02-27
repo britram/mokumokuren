@@ -3,11 +3,12 @@ package mokumokuren
 import (
 	"encoding/binary"
 	"fmt"
-	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 )
 
 // Counter field numbers
@@ -125,7 +126,7 @@ func (ft *FlowTable) ChainTCPFinishing() {
 
 ///////////////////////////////////////////////////////////////////////
 //
-// TCP loss and RTT tracking (from QoF)
+// TCP RTT tracking (from QoF)
 //
 ///////////////////////////////////////////////////////////////////////f
 
@@ -278,6 +279,12 @@ func (ft *FlowTable) ChainTCPRTT() {
 
 ///////////////////////////////////////////////////////////////////////
 //
+// TCP loss, reordering, and obsloss tracking (from QoF gapstack)
+//
+///////////////////////////////////////////////////////////////////////f
+
+///////////////////////////////////////////////////////////////////////
+//
 // Basic emitters
 //
 ///////////////////////////////////////////////////////////////////////f
@@ -285,21 +292,21 @@ func (ft *FlowTable) ChainTCPRTT() {
 // Emitter chain function to print flow records containing
 // information from the provided chains to the log
 
-func BasicLogEmitter(fe *FlowEntry) bool {
+func BuiltinLogEmitter(fe *FlowEntry) bool {
 
 	additional := make([]string, 0)
 
 	// try to get rtt data
 	rv := fe.Data[TCPRTTData]
 	if rv != nil {
-		est := rv.(tcpRttEstimator)
+		est := rv.(*tcpRttEstimator)
 		additional = append(additional, fmt.Sprintf("rtt %d ms", est.val/1000))
 	}
 
 	// try to get fin state data for a flow end reason
 	fv := fe.Data[TCPFinStateData]
 	if fv != nil {
-		fs := fv.(tcpFinState)
+		fs := fv.(*tcpFinState)
 		if fs.finacked[0] && fs.finacked[1] {
 			additional = append(additional, "FIN")
 		} else if fs.finacked[0] || fs.finacked[1] {

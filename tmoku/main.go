@@ -2,14 +2,15 @@ package main
 
 import (
 	"flag"
-	"github.com/britram/mokumokuren"
-	"github.com/google/gopacket"
-	_ "github.com/google/gopacket/layers"
-	"github.com/google/gopacket/pcap"
 	"log"
 	"os"
 	"os/signal"
 	"runtime/pprof"
+
+	"github.com/britram/mokumokuren"
+	"github.com/google/gopacket"
+	_ "github.com/google/gopacket/layers"
+	"github.com/google/gopacket/pcap"
 )
 
 func main() {
@@ -34,9 +35,10 @@ func main() {
 	// do simple counting and TCP state tracking
 	ft.ChainBasicCounters()
 	ft.ChainTCPFinishing()
+	ft.ChainTCPRTT()
 
-	// add an emitter that just prints flows
-	ft.AddEmitterFunction(mokumokuren.BasicLogEmitter)
+	// add an emitter that prints flows from built in chains
+	ft.AddEmitterFunction(mokumokuren.BuiltinLogEmitter)
 
 	handle, err := pcap.OpenOffline(*fileflag)
 	if err != nil {
