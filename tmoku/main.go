@@ -35,7 +35,7 @@ func main() {
 	// do simple counting and TCP state tracking
 	ft.ChainBasicCounters()
 	ft.ChainTCPFinishing()
-	ft.ChainTCPRTT()
+	// ft.ChainTCPRTT() // this doesn't work yet
 
 	// add an emitter that prints flows from built in chains
 	ft.AddEmitterFunction(mokumokuren.BuiltinLogEmitter)

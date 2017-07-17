@@ -2,7 +2,6 @@ package mokumokuren
 
 import (
 	"encoding/binary"
-	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -127,6 +126,7 @@ func (ft *FlowTable) ChainTCPFinishing() {
 ///////////////////////////////////////////////////////////////////////
 //
 // TCP RTT tracking (from QoF)
+// Warning: this does not yet appear to work, debug it.
 //
 ///////////////////////////////////////////////////////////////////////f
 
@@ -296,12 +296,12 @@ func BuiltinLogEmitter(fe *FlowEntry) bool {
 
 	additional := make([]string, 0)
 
-	// try to get rtt data
-	rv := fe.Data[TCPRTTData]
-	if rv != nil {
-		est := rv.(*tcpRttEstimator)
-		additional = append(additional, fmt.Sprintf("rtt %d ms", est.val/1000))
-	}
+	// try to get rtt data (this doesn't work at the moment)
+	// rv := fe.Data[TCPRTTData]
+	// if rv != nil {
+	// 	est := rv.(*tcpRttEstimator)
+	// 	additional = append(additional, fmt.Sprintf("rtt %d ms", est.val/1000))
+	// }
 
 	// try to get fin state data for a flow end reason
 	fv := fe.Data[TCPFinStateData]
