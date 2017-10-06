@@ -32,13 +32,14 @@ func main() {
 	// get a flowtable
 	ft := mokumokuren.NewFlowTable()
 
+    ft.ChainGoFunctions()
 	// do simple counting and TCP state tracking
-	ft.ChainBasicCounters()
-	ft.ChainTCPFinishing()
+	//ft.ChainBasicCounters()
+	//ft.ChainTCPFinishing()
 	// ft.ChainTCPRTT() // this doesn't work yet
 
 	// add an emitter that prints flows from built in chains
-	ft.AddEmitterFunction(mokumokuren.BuiltinLogEmitter)
+	//ft.AddEmitterFunction(mokumokuren.BuiltinLogEmitter)
 
 	handle, err := pcap.OpenOffline(*fileflag)
 	if err != nil {
