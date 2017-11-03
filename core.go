@@ -1,3 +1,24 @@
+// Mokumokuren is an extensible flow meter. It is built around a flow table,
+// which takes packets (from GoPacket), classifies them into bidirectional
+// flows by 5-tuple (IP addresses, transport-layer ports, and protocol), and
+// runs them through a set of functions bound to the flow table at runtime.
+// These functions take information from the packets and use it to generate
+// flow-level information.
+//
+// To use this package, create a flow table, attach measurement functions to
+// it, feeding it packets until you're out of packets, then shut it down:
+//
+//      ps := ...some GoPacket packet source...
+//
+//		ft := mokumokuren.NewFlowTable()
+//		ft.ChainBasicCounters()  // count octets and packets per flow
+//		ft.ChainTCPFinishing()   // track TCP FIN flags
+//
+//		for p := range ps {
+//			ft.HandlePacket(p)
+//		}
+//		ft.Shutdown()
+
 package mokumokuren
 
 import (
@@ -10,8 +31,9 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-const CQLEN = 64
+const channelQueueLength = 64
 
+// PacketEvent represents the arrival of a
 type PacketEvent struct {
 	Packet    gopacket.Packet
 	Timestamp time.Time
@@ -129,7 +151,6 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 
 // FIXME: make FlowEntry an interface
 // and add a factory instead of doing runtime typing here.
-
 type FlowEntry struct {
 	Key FlowKey
 
@@ -207,7 +228,7 @@ func NewFlowTable() (ft *FlowTable) {
 	ft.layerChain = make([]layerChainEntry, 0)
 	ft.emitterChain = make([]FlowChainFn, 0)
 	ft.active = make(map[FlowKey]*FlowEntry)
-	ft.reapChannel = make(chan FlowKey, CQLEN)
+	ft.reapChannel = make(chan FlowKey, channelQueueLength)
 	ft.reaperDone = make(chan struct{})
 	ft.tickChannel = make(chan time.Time)
 
