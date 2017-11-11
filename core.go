@@ -38,7 +38,7 @@ type PacketEvent struct {
 	// the packet that arrived
 	Packet gopacket.Packet
 	// time at which the packet arrived
-	Timestamp time.Time
+	Timestamp *time.Time
 	// set if the packet matched a reverse flow key
 	Reverse bool
 }
@@ -152,16 +152,23 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	return
 }
 
+var dataCount int
+
+func RegisterDataIndex() int {
+	dataCount++
+	return dataCount - 1
+}
+
 // FIXME: make FlowEntry an interface? see #1.
 type FlowEntry struct {
 	// Flow key
 	Key FlowKey
 
 	// Timestamp of first packet in the flow
-	StartTime time.Time
+	StartTime *time.Time
 
 	// Timestamp of last packet in the flow
-	LastTime time.Time
+	LastTime *time.Time
 
 	// Count of packets observed in the forward direction
 	FwdPktCount uint64
@@ -176,7 +183,7 @@ type FlowEntry struct {
 	RevOctCount uint64
 
 	// Arbitrary data for non-core chain functions
-	Data map[string]interface{}
+	Data []interface{}
 
 	rstseen  [2]bool
 	finseen  [2]bool
@@ -287,7 +294,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
 		ft.idleq.Tick(k, timestamp)
-		fe.packetChannel <- &PacketEvent{pkt, timestamp, rev}
+		fe.packetChannel <- &PacketEvent{pkt, &timestamp, rev}
 	}
 }
 
@@ -354,6 +361,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	// No entry available. Create a new one.
 	fe = new(FlowEntry)
 	fe.Key = key
+	fe.Data = make([]interface{}, dataCount)
 	fe.packetChannel = make(chan *PacketEvent)
 	fe.reapChannel = ft.reapChannel
 	fe.flowFinishing = make(chan struct{})
@@ -369,7 +377,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 		for running {
 			select {
 			case pe := <-fe.packetChannel:
-				if fe.LastTime.Before(pe.Timestamp) {
+				if fe.LastTime.Before(*pe.Timestamp) {
 					fe.LastTime = pe.Timestamp
 				}
 
