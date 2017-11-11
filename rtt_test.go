@@ -45,10 +45,12 @@ func rttVerificationEmitter(t *testing.T, filename string, e ExpectedFlowRTTs) m
 		metrics, ok := e[fe.Key]
 		if ok {
 			if metrics.Handshake != rttdata.HandshakeRTT {
-				t.Fatalf("flow %s expected hrtt %d got %d", fe.Key, metrics.Handshake, rttdata.HandshakeRTT)
+				t.Logf("flow %s expected hrtt %d got %d", fe.Key, metrics.Handshake, rttdata.HandshakeRTT)
+				t.Fail()
 			}
 			if metrics.Minimum != rttdata.MinimumRTT {
-				t.Fatalf("flow %s expected hrtt %d got %d", fe.Key, metrics.Minimum, rttdata.MinimumRTT)
+				t.Logf("flow %s expected minrtt %d got %d", fe.Key, metrics.Minimum, rttdata.MinimumRTT)
+				t.Fail()
 			}
 		}
 		return true
@@ -61,7 +63,9 @@ func TestRTTMeasurement(t *testing.T) {
 		expectation ExpectedFlowRTTs
 	}{
 		{"testdata/magpie_v6.pcap",
-			ExpectedFlowRTTs{},
+			ExpectedFlowRTTs{
+				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedRTTMetrics{183653000, 0},
+			},
 		},
 	}
 

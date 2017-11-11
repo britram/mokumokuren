@@ -46,16 +46,20 @@ func coreVerificationEmitter(t *testing.T, filename string, e ExpectedFlows) mok
 		counters, ok := e[fe.Key]
 		if ok {
 			if counters.FwdPktCount != fe.FwdPktCount {
-				t.Fatalf("flow %s expected fpkt %d got %d", fe.Key, counters.FwdPktCount, fe.FwdPktCount)
+				t.Logf("flow %s expected fpkt %d got %d", fe.Key, counters.FwdPktCount, fe.FwdPktCount)
+				t.Fail()
 			}
 			if counters.FwdOctCount != fe.FwdOctCount {
-				t.Fatalf("flow %s expected foct %d got %d", fe.Key, counters.FwdOctCount, fe.FwdOctCount)
+				t.Logf("flow %s expected foct %d got %d", fe.Key, counters.FwdOctCount, fe.FwdOctCount)
+				t.Fail()
 			}
 			if counters.RevPktCount != fe.RevPktCount {
-				t.Fatalf("flow %s expected rpkt %d got %d", fe.Key, counters.RevPktCount, fe.RevPktCount)
+				t.Logf("flow %s expected rpkt %d got %d", fe.Key, counters.RevPktCount, fe.RevPktCount)
+				t.Fail()
 			}
 			if counters.RevOctCount != fe.RevOctCount {
-				t.Fatalf("flow %s expected roct %d got %d", fe.Key, counters.RevOctCount, fe.RevOctCount)
+				t.Logf("flow %s expected roct %d got %d", fe.Key, counters.RevOctCount, fe.RevOctCount)
+				t.Fail()
 			}
 		}
 		return true
@@ -71,7 +75,7 @@ func TestPcapRead(t *testing.T) {
 	}{
 		{"testdata/magpie_v6.pcap",
 			ExpectedFlows{
-				{"2001:67c:370:128:98a9:b532:999b:b216", "2a03:b0c0:3:d0::27a1:1", 52319, 443, 6}: ExpectedCounters{65, 66, 3926, 69891},
+				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedCounters{32, 36, 1492, 44014},
 			},
 		},
 		{"testdata/github.pcap",
