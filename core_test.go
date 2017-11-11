@@ -21,24 +21,24 @@ type ExpectedFlows map[moku.FlowKey]ExpectedCounters
 
 const DumpExpectedFlows = true
 
-var EmitterLog *os.File
+var CoreEmitterLog *os.File
 
 func init() {
 	if DumpExpectedFlows {
 		var err error
-		EmitterLog, err = os.Create("testdata/emitter.log")
+		CoreEmitterLog, err = os.Create("testdata/core_test.log")
 		if err != nil {
 			panic(err)
 		}
 	}
 }
 
-func testVerificationEmitter(t *testing.T, filename string, e ExpectedFlows) moku.FlowChainFn {
+func coreVerificationEmitter(t *testing.T, filename string, e ExpectedFlows) moku.FlowChainFn {
 	return func(fe *moku.FlowEntry) bool {
 
 		if DumpExpectedFlows {
-			fmt.Fprintf(EmitterLog, "// in file %s\n", filename)
-			fmt.Fprintf(EmitterLog, "{\"%s\",\"%s\",%d,%d,%d}: ExpectedCounters{%d,%d,%d,%d}\n",
+			fmt.Fprintf(CoreEmitterLog, "// in file %s\n", filename)
+			fmt.Fprintf(CoreEmitterLog, "{\"%s\",\"%s\",%d,%d,%d}: ExpectedCounters{%d,%d,%d,%d}\n",
 				fe.Key.Sip, fe.Key.Dip, fe.Key.Sp, fe.Key.Dp, fe.Key.P,
 				fe.FwdPktCount, fe.RevPktCount, fe.FwdOctCount, fe.RevOctCount)
 		}
@@ -98,7 +98,7 @@ func TestPcapRead(t *testing.T) {
 		ft := moku.NewFlowTable()
 		ft.CountPacketsAndOctets()
 		ft.TrackTCPClose()
-		ft.AddEmitterFunction(testVerificationEmitter(t, spec.filename, spec.expectation))
+		ft.AddEmitterFunction(coreVerificationEmitter(t, spec.filename, spec.expectation))
 
 		for p := range ps.Packets() {
 			ft.HandlePacket(p)

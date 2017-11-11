@@ -28,4 +28,4 @@ tmoku/tmoku
 
 # test data
 mawi_traces/
-testdata/emitter.log
+testdata/*.log

@@ -377,7 +377,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 		for running {
 			select {
 			case pe := <-fe.packetChannel:
-				if fe.LastTime.Before(*pe.Timestamp) {
+				if fe.LastTime == nil || fe.LastTime.Before(*pe.Timestamp) {
 					fe.LastTime = pe.Timestamp
 				}
 

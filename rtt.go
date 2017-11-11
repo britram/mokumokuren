@@ -39,6 +39,11 @@ type RTTData struct {
 //
 //////////////////////////////////////////////////////////////////////
 
+func rttInit(fe *FlowEntry, pe *PacketEvent) bool {
+	fe.Data[RTTDataIndex] = new(RTTData)
+	return true
+}
+
 // for checking TCP handshake RTT
 func rttTCPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	tcp := layer.(*layers.TCP)
@@ -56,5 +61,6 @@ func rttTCPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 }
 
 func (ft *FlowTable) TrackRoundTripTime() {
+	ft.AddInitialFunction(rttInit)
 	ft.AddLayerFunction(rttTCPPacket, layers.LayerTypeTCP)
 }
