@@ -152,17 +152,31 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	return
 }
 
-// FIXME: make FlowEntry an interface
+// FIXME: make FlowEntry an interface? see #1.
 type FlowEntry struct {
+	// Flow key
 	Key FlowKey
 
+	// Timestamp of first packet in the flow
 	StartTime time.Time
-	LastTime  time.Time
 
+	// Timestamp of last packet in the flow
+	LastTime time.Time
+
+	// Count of packets observed in the forward direction
 	FwdPktCount uint64
+
+	// Count of packets observed in the reverse direction
 	RevPktCount uint64
+
+	// Count of octets observed in the forward direction
 	FwdOctCount uint64
+
+	// Count of octets observed in the reverse direction
 	RevOctCount uint64
+
+	// Arbitrary data for non-core chain functions
+	Data map[string]interface{}
 
 	rstseen  [2]bool
 	finseen  [2]bool
@@ -183,8 +197,10 @@ func (fe *FlowEntry) Finish() {
 
 // Return a string representation of this flow entry
 func (fe *FlowEntry) String() string {
-	// FIXME this gets fixed when moving to statically typed flow entries
-	return fmt.Sprintf("%v", *fe)
+	return fmt.Sprintf("[%s - %s] %s: (%d/%d) -> (%d/%d)",
+		fe.StartTime.Format(time.RFC3339),
+		fe.LastTime.Format(time.RFC3339),
+		fe.Key, fe.FwdPktCount, fe.FwdOctCount, fe.RevPktCount, fe.RevOctCount)
 }
 
 type FlowChainFn func(*FlowEntry) bool
