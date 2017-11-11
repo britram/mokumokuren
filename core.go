@@ -14,7 +14,7 @@
 //		ft.CountPacketsAndOctets()  // count octets and packets per flow
 //		ft.TrackTCPClose()          // track TCP FIN/RST flags
 //
-//		for p := range ps {
+//		for p := range ps.Packets() {
 //			ft.HandlePacket(p)
 //		}
 //		ft.Shutdown()
