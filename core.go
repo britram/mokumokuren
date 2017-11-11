@@ -33,11 +33,14 @@ import (
 
 const channelQueueLength = 64
 
-// PacketEvent represents the arrival of a
+// PacketEvent represents the arrival of a packet at a given time.
 type PacketEvent struct {
-	Packet    gopacket.Packet
+	// the packet that arrived
+	Packet gopacket.Packet
+	// time at which the packet arrived
 	Timestamp time.Time
-	Reverse   bool
+	// set if the packet matched a reverse flow key
+	Reverse bool
 }
 
 type FlowKey struct {
@@ -166,7 +169,7 @@ type FlowEntry struct {
 	finacked [2]bool
 	finseq   [2]uint32
 
-	packetChannel chan PacketEvent
+	packetChannel chan *PacketEvent
 	reapChannel   chan FlowKey
 	flowFinishing chan struct{}
 	flowDone      chan struct{}
@@ -186,9 +189,9 @@ func (fe *FlowEntry) String() string {
 
 type FlowChainFn func(*FlowEntry) bool
 
-type PacketChainFn func(*FlowEntry, PacketEvent) bool
+type PacketChainFn func(*FlowEntry, *PacketEvent) bool
 
-type LayerChainFn func(*FlowEntry, PacketEvent, gopacket.Layer) bool
+type LayerChainFn func(*FlowEntry, *PacketEvent, gopacket.Layer) bool
 
 type layerChainEntry struct {
 	LayerType gopacket.LayerType
@@ -268,7 +271,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
 		ft.idleq.Tick(k, timestamp)
-		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
+		fe.packetChannel <- &PacketEvent{pkt, timestamp, rev}
 	}
 }
 
@@ -335,7 +338,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	// No entry available. Create a new one.
 	fe = new(FlowEntry)
 	fe.Key = key
-	fe.packetChannel = make(chan PacketEvent)
+	fe.packetChannel = make(chan *PacketEvent)
 	fe.reapChannel = ft.reapChannel
 	fe.flowFinishing = make(chan struct{})
 	fe.flowDone = make(chan struct{})
@@ -492,7 +495,7 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 //
 ///////////////////////////////////////////////////////////////////////
 
-func packetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
+func packetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	if pe.Reverse {
 		fe.RevPktCount += 1
 	} else {
@@ -501,7 +504,7 @@ func packetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	return true
 }
 
-func ip4OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
+func ip4OctetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	ip := layer.(*layers.IPv4)
 	if pe.Reverse {
 		fe.RevOctCount += uint64(ip.Length)
@@ -511,7 +514,7 @@ func ip4OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
 	return true
 }
 
-func ip6OctetCount(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
+func ip6OctetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	ip := layer.(*layers.IPv6)
 	if pe.Reverse {
 		fe.RevOctCount += uint64(ip.Length)
@@ -534,7 +537,7 @@ func (ft *FlowTable) CountPacketsAndOctets() {
 //
 ///////////////////////////////////////////////////////////////////////
 
-func tcpFinStateTrack(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) bool {
+func tcpFinStateTrack(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	tcp := layer.(*layers.TCP)
 	var fwd, rev int
 	if pe.Reverse {
