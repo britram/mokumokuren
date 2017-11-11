@@ -1,3 +1,24 @@
+// Mokumokuren is an extensible flow meter. It is built around a flow table,
+// which takes packets (from GoPacket), classifies them into bidirectional
+// flows by 5-tuple (IP addresses, transport-layer ports, and protocol), and
+// runs them through a set of functions bound to the flow table at runtime.
+// These functions take information from the packets and use it to generate
+// flow-level information.
+//
+// To use this package, create a flow table, attach measurement functions to
+// it, feeding it packets until you're out of packets, then shut it down:
+//
+//      ps := ...some GoPacket packet source...
+//
+//		ft := mokumokuren.NewFlowTable()
+//		ft.CountPacketsAndOctets()  // count octets and packets per flow
+//		ft.TrackTCPClose()          // track TCP FIN/RST flags
+//
+//		for p := range ps.Packets() {
+//			ft.HandlePacket(p)
+//		}
+//		ft.Shutdown()
+
 package mokumokuren
 
 import (
@@ -10,12 +31,16 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-const CQLEN = 64
+const channelQueueLength = 64
 
+// PacketEvent represents the arrival of a packet at a given time.
 type PacketEvent struct {
-	Packet    gopacket.Packet
+	// the packet that arrived
+	Packet gopacket.Packet
+	// time at which the packet arrived
 	Timestamp time.Time
-	Reverse   bool
+	// set if the packet matched a reverse flow key
+	Reverse bool
 }
 
 type FlowKey struct {
@@ -127,18 +152,38 @@ func ExtractFlowKey(pkt gopacket.Packet) (k FlowKey) {
 	return
 }
 
-// FIXME: make FlowEntry an interface
-// and add a factory instead of doing runtime typing here.
-
+// FIXME: make FlowEntry an interface? see #1.
 type FlowEntry struct {
+	// Flow key
 	Key FlowKey
 
-	Counters  map[int]int
-	Data      map[int]interface{}
+	// Timestamp of first packet in the flow
 	StartTime time.Time
-	LastTime  time.Time
 
-	packetChannel chan PacketEvent
+	// Timestamp of last packet in the flow
+	LastTime time.Time
+
+	// Count of packets observed in the forward direction
+	FwdPktCount uint64
+
+	// Count of packets observed in the reverse direction
+	RevPktCount uint64
+
+	// Count of octets observed in the forward direction
+	FwdOctCount uint64
+
+	// Count of octets observed in the reverse direction
+	RevOctCount uint64
+
+	// Arbitrary data for non-core chain functions
+	Data map[string]interface{}
+
+	rstseen  [2]bool
+	finseen  [2]bool
+	finacked [2]bool
+	finseq   [2]uint32
+
+	packetChannel chan *PacketEvent
 	reapChannel   chan FlowKey
 	flowFinishing chan struct{}
 	flowDone      chan struct{}
@@ -146,21 +191,23 @@ type FlowEntry struct {
 
 // Mark this flow as finished. To be called by a layer chain function
 // on the last packet of the flow, or by an idle flow reaper.
-
 func (fe *FlowEntry) Finish() {
 	fe.reapChannel <- fe.Key
 }
 
+// Return a string representation of this flow entry
 func (fe *FlowEntry) String() string {
-	// FIXME this gets fixed when moving to statically typed flow entries
-	return fmt.Sprintf("%v", *fe)
+	return fmt.Sprintf("[%s - %s] %s: (%d/%d) -> (%d/%d)",
+		fe.StartTime.Format(time.RFC3339),
+		fe.LastTime.Format(time.RFC3339),
+		fe.Key, fe.FwdPktCount, fe.FwdOctCount, fe.RevPktCount, fe.RevOctCount)
 }
 
 type FlowChainFn func(*FlowEntry) bool
 
-type PacketChainFn func(*FlowEntry, PacketEvent) bool
+type PacketChainFn func(*FlowEntry, *PacketEvent) bool
 
-type LayerChainFn func(*FlowEntry, PacketEvent, gopacket.Layer) bool
+type LayerChainFn func(*FlowEntry, *PacketEvent, gopacket.Layer) bool
 
 type layerChainEntry struct {
 	LayerType gopacket.LayerType
@@ -207,7 +254,7 @@ func NewFlowTable() (ft *FlowTable) {
 	ft.layerChain = make([]layerChainEntry, 0)
 	ft.emitterChain = make([]FlowChainFn, 0)
 	ft.active = make(map[FlowKey]*FlowEntry)
-	ft.reapChannel = make(chan FlowKey, CQLEN)
+	ft.reapChannel = make(chan FlowKey, channelQueueLength)
 	ft.reaperDone = make(chan struct{})
 	ft.tickChannel = make(chan time.Time)
 
@@ -240,7 +287,7 @@ func (ft *FlowTable) HandlePacket(pkt gopacket.Packet) {
 	fe, rev := ft.flowEntry(k)
 	if fe != nil {
 		ft.idleq.Tick(k, timestamp)
-		fe.packetChannel <- PacketEvent{pkt, timestamp, rev}
+		fe.packetChannel <- &PacketEvent{pkt, timestamp, rev}
 	}
 }
 
@@ -307,9 +354,7 @@ func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
 	// No entry available. Create a new one.
 	fe = new(FlowEntry)
 	fe.Key = key
-	fe.Counters = make(map[int]int)
-	fe.Data = make(map[int]interface{})
-	fe.packetChannel = make(chan PacketEvent)
+	fe.packetChannel = make(chan *PacketEvent)
 	fe.reapChannel = ft.reapChannel
 	fe.flowFinishing = make(chan struct{})
 	fe.flowDone = make(chan struct{})
@@ -458,4 +503,90 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 	close(ft.reaperDone)
 
 	log.Println("finished reaper down")
+}
+
+///////////////////////////////////////////////////////////////////////
+//
+// Basic counters: forward and reverse packets and (IP) octets
+//
+///////////////////////////////////////////////////////////////////////
+
+func packetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
+	if pe.Reverse {
+		fe.RevPktCount += 1
+	} else {
+		fe.FwdPktCount += 1
+	}
+	return true
+}
+
+func ip4OctetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
+	ip := layer.(*layers.IPv4)
+	if pe.Reverse {
+		fe.RevOctCount += uint64(ip.Length)
+	} else {
+		fe.FwdOctCount += uint64(ip.Length)
+	}
+	return true
+}
+
+func ip6OctetCount(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
+	ip := layer.(*layers.IPv6)
+	if pe.Reverse {
+		fe.RevOctCount += uint64(ip.Length)
+	} else {
+		fe.FwdOctCount += uint64(ip.Length)
+	}
+	return true
+}
+
+func (ft *FlowTable) CountPacketsAndOctets() {
+	ft.AddLayerFunction(packetCount, layers.LayerTypeIPv4)
+	ft.AddLayerFunction(packetCount, layers.LayerTypeIPv6)
+	ft.AddLayerFunction(ip4OctetCount, layers.LayerTypeIPv4)
+	ft.AddLayerFunction(ip6OctetCount, layers.LayerTypeIPv6)
+}
+
+///////////////////////////////////////////////////////////////////////
+//
+// TCP FIN and RST state tracking
+//
+///////////////////////////////////////////////////////////////////////
+
+func tcpFinStateTrack(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
+	tcp := layer.(*layers.TCP)
+	var fwd, rev int
+	if pe.Reverse {
+		fwd, rev = 1, 0
+	} else {
+		fwd, rev = 0, 1
+	}
+
+	if tcp.RST {
+		fe.rstseen[fwd] = true
+		fe.Finish()
+		return false
+	}
+
+	if tcp.FIN {
+		fe.finseen[fwd] = true
+		fe.finseq[fwd] = tcp.Seq
+	}
+
+	if fe.finseen[rev] && tcp.ACK && tcp.Ack == fe.finseq[rev] {
+		fe.finacked[rev] = true
+	}
+
+	if fe.finacked[fwd] && fe.finacked[rev] {
+		fe.Finish()
+		return false
+	}
+
+	return true
+}
+
+// Adds functions for finishing flows on TCP FIN and RST
+// to a given flow table
+func (ft *FlowTable) TrackTCPClose() {
+	ft.AddLayerFunction(tcpFinStateTrack, layers.LayerTypeTCP)
 }

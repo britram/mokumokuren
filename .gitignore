@@ -29,5 +29,6 @@ _testmain.go
 # binaries
 tmoku/tmoku
 
-# for now, ignore the test data
-testdata/
+# test data
+mawi_traces/
+testdata/emitter.log
