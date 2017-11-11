@@ -74,7 +74,7 @@ func TestRTTMeasurement(t *testing.T) {
 	}{
 		{"testdata/magpie_v6.pcap",
 			ExpectedFlowRTTs{
-				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedRTTMetrics{183653000, 183555000, 216679227, 13},
+				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedRTTMetrics{183653000, 188679000, 378764714, 7},
 			},
 		},
 	}

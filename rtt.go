@@ -36,17 +36,6 @@ type RTTData struct {
 	awaitVal  [2]uint32
 }
 
-func extractTimestamp(tcp *layers.TCP) (uint32, uint32, bool) {
-	for _, opt := range tcp.Options {
-		if opt.OptionType == layers.TCPOptionKindTimestamps && len(opt.OptionData) >= 10 {
-			tsval := binary.BigEndian.Uint32(opt.OptionData[2:6])
-			tsecr := binary.BigEndian.Uint32(opt.OptionData[6:10])
-			return tsval, tsecr, true
-		}
-	}
-	return 0, 0, false
-}
-
 ///////////////////////////////////////////////////////////////////////
 //
 // TCP handshake tracking
@@ -56,6 +45,17 @@ func extractTimestamp(tcp *layers.TCP) (uint32, uint32, bool) {
 func rttInit(fe *FlowEntry, pe *PacketEvent) bool {
 	fe.Data[RTTDataIndex] = new(RTTData)
 	return true
+}
+
+func extractTimestamp(tcp *layers.TCP) (uint32, uint32, bool) {
+	for _, opt := range tcp.Options {
+		if opt.OptionType == layers.TCPOptionKindTimestamps && len(opt.OptionData) >= 8 {
+			tsval := binary.BigEndian.Uint32(opt.OptionData[0:4])
+			tsecr := binary.BigEndian.Uint32(opt.OptionData[4:8])
+			return tsval, tsecr, true
+		}
+	}
+	return 0, 0, false
 }
 
 func wrapCompare(a, b uint32) int {
