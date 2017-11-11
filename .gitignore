@@ -28,3 +28,6 @@ _testmain.go
 
 # binaries
 tmoku/tmoku
+
+# for now, ignore the test data
+testdata/
