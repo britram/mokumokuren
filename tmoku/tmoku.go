@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"runtime/pprof"
 
-	"github.com/britram/mokumokuren"
+	moku "github.com/britram/mokumokuren"
 	"github.com/google/gopacket"
 	_ "github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
@@ -30,15 +30,25 @@ func main() {
 	}()
 
 	// get a flowtable
-	ft := mokumokuren.NewFlowTable()
+	ft := moku.NewFlowTable()
 
 	// do simple counting and TCP state tracking
-	ft.ChainBasicCounters()
-	ft.ChainTCPFinishing()
-	// ft.ChainTCPRTT() // this doesn't work yet
+	ft.CountPacketsAndOctets()
+	ft.TrackTCPClose()
 
-	// add an emitter that prints flows from built in chains
-	ft.AddEmitterFunction(mokumokuren.BuiltinLogEmitter)
+	// do RTTs
+	ft.TrackRoundTripTime()
+
+	// add an emitter that prints flows including rtts
+	ft.AddEmitterFunction(func(fe *moku.FlowEntry) bool {
+		rttdata := fe.Data[moku.RTTDataIndex].(*moku.RTTData)
+		log.Printf("%s RTT %.3f/%.3f/%.3f", fe,
+			float64(rttdata.HandshakeRTT)/float64(1000000),
+			float64(rttdata.MinimumRTT)/float64(1000000),
+			float64(rttdata.MeanRTT)/float64(1000000))
+
+		return true
+	})
 
 	handle, err := pcap.OpenOffline(*fileflag)
 	if err != nil {

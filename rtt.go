@@ -2,6 +2,7 @@ package mokumokuren
 
 import (
 	"encoding/binary"
+	"log"
 	"time"
 
 	"github.com/google/gopacket"
@@ -137,6 +138,36 @@ func rttTCPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 		} else {
 			d.awaitVal[rdir] = tcp.Seq
 		}
+	}
+
+	return true
+}
+
+// for checking TCP handshake RTT
+func rttUDPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
+	udp := layer.(*layers.UDP)
+	d := fe.Data[RTTDataIndex].(*RTTData)
+
+	// shortcircuit if we already saw a handshake...
+	if d.firstReverse != nil && d.secondForward != nil {
+		return true
+	}
+
+	// try to parse a quic header
+	var q QUICHeader
+	if err := q.ExtractFromUDP(udp); err != nil {
+		if err != NotUDP443 {
+			log.Printf("error parsing quic header: %s", err.Error())
+		}
+		return true
+	}
+
+	// now calculate handshake RTT
+	if d.firstReverse == nil && pe.Reverse && q.PktType == QUICPktTypeServerCleartext {
+		d.firstReverse = pe.Timestamp
+	} else if d.secondForward == nil && q.PktType == QUICPktTypeClientCleartext {
+		d.secondForward = pe.Timestamp
+		d.HandshakeRTT = d.secondForward.Sub(*fe.StartTime)
 	}
 
 	return true
