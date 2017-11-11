@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 
 	"github.com/google/gopacket/layers"
 )
@@ -27,11 +28,11 @@ import (
 //******************************************************************************
 //
 
-var NotUDP443 error
+var NotQUIC error
 var QUICHeaderTruncated error
 
 func init() {
-	NotUDP443 = errors.New("I don't think this is a QUIC packet")
+	NotQUIC = errors.New("I don't think this is a QUIC packet")
 	QUICHeaderTruncated = errors.New("The UDP payload does not contain a complete QUIC header")
 }
 
@@ -185,20 +186,28 @@ var quicKeyPhase = map[byte]int{
 
 // A QUIC packet header or QUIC special packet
 type QUICHeader struct {
-	PktType   byte   // packet type, not decoded
-	ConnID    uint64 // Connection ID
-	PktNum    uint32 // Packet Number
-	PktNumLen int    // Length of packet number on wire
-	Version   uint32 // Version number for VN packets
-	KeyPhase  int    // Key phase for short packets
+	PktType         byte   // packet type, not decoded
+	ConnID          uint64 // Connection ID
+	PktNum          uint32 // Packet Number
+	PktNumLen       int    // Length of packet number on wire
+	Version         uint32 // Version number for VN packets
+	KeyPhase        int    // Key phase for short packets
+	MeasurementData []byte // Piet's measurement byte
 
-	payload []byte
+	Payload []byte
 }
 
+// Port to use for port-based QUIC recognition
+var QUICPort uint16 = 443
+
+// Set in order to snarf the measurement byte
+var MeasurementBytePresent bool = false
+
 func (q *QUICHeader) ExtractFromUDP(udp *layers.UDP) error {
-	// if it ain't UDP/443, it ain't QUIC
-	if udp.DstPort != 443 && udp.SrcPort != 443 {
-		return NotUDP443
+	// if it ain't on the right port, it ain't QUIC
+	if uint16(udp.DstPort) != QUICPort && uint16(udp.SrcPort) != QUICPort {
+		log.Printf("got UDP %d -> %d, QUIC is on %d", udp.SrcPort, udp.DstPort, QUICPort)
+		return NotQUIC
 	}
 
 	data := udp.Payload
@@ -216,7 +225,18 @@ func (q *QUICHeader) ExtractFromUDP(udp *layers.UDP) error {
 	if !ok {
 		return fmt.Errorf("Unknown QUIC packet type %d", q.PktType)
 	}
-	q.payload = data[payoff:]
+
+	if MeasurementBytePresent {
+		q.MeasurementData = data[payoff : payoff+1]
+		if len(data) < payoff+1 {
+			q.Payload = data[payoff+1:]
+		} else {
+			q.Payload = nil
+		}
+	} else {
+		q.MeasurementData = nil
+		q.Payload = data[payoff:]
+	}
 
 	// unpack quic header
 	cidoffset := quicCIDOffset[q.PktType]

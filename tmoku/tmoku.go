@@ -15,9 +15,13 @@ import (
 
 func main() {
 	fileflag := flag.String("file", "-", "pcap file to read packets from")
+	quicportflag := flag.Uint("quic", 443, "UDP port to use for QUIC recognition")
 
 	// parse command line
 	flag.Parse()
+
+	// set quic port
+	moku.QUICPort = uint16(*quicportflag)
 
 	// set up sigterm handling
 	interrupt := make(chan os.Signal, 1)

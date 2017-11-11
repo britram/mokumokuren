@@ -68,6 +68,8 @@ func rttVerificationEmitter(t *testing.T, filename string, e ExpectedFlowRTTs) m
 }
 func TestRTTMeasurement(t *testing.T) {
 
+	moku.QUICPort = 4433
+
 	specs := []struct {
 		filename    string
 		expectation ExpectedFlowRTTs
@@ -75,6 +77,11 @@ func TestRTTMeasurement(t *testing.T) {
 		{"testdata/magpie_v6.pcap",
 			ExpectedFlowRTTs{
 				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedRTTMetrics{183653000, 188679000, 378764714, 7},
+			},
+		},
+		{"testdata/quicly.pcap",
+			ExpectedFlowRTTs{
+				{"127.0.0.1", "127.0.0.1", 53188, 4433, 17}: ExpectedRTTMetrics{1166000, 0, 0, 0},
 			},
 		},
 	}

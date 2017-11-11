@@ -156,9 +156,9 @@ func rttUDPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	// try to parse a quic header
 	var q QUICHeader
 	if err := q.ExtractFromUDP(udp); err != nil {
-		if err != NotUDP443 {
-			log.Printf("error parsing quic header: %s", err.Error())
-		}
+		//if err != NotQUIC {
+		log.Printf("error parsing quic header: %s", err.Error())
+		//}
 		return true
 	}
 
@@ -170,10 +170,13 @@ func rttUDPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 		d.HandshakeRTT = d.secondForward.Sub(*fe.StartTime)
 	}
 
+	// FIXME add measurement byte handling
+
 	return true
 }
 
 func (ft *FlowTable) TrackRoundTripTime() {
 	ft.AddInitialFunction(rttInit)
 	ft.AddLayerFunction(rttTCPPacket, layers.LayerTypeTCP)
+	ft.AddLayerFunction(rttUDPPacket, layers.LayerTypeUDP)
 }

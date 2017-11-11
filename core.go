@@ -204,7 +204,7 @@ func (fe *FlowEntry) Finish() {
 
 // Return a string representation of this flow entry
 func (fe *FlowEntry) String() string {
-	return fmt.Sprintf("[%s - %s] %s: (%d/%d) -> (%d/%d)",
+	return fmt.Sprintf("[%s - %s] %s (%d/%d) -> (%d/%d)",
 		fe.StartTime.Format(time.RFC3339),
 		fe.LastTime.Format(time.RFC3339),
 		fe.Key, fe.FwdPktCount, fe.FwdOctCount, fe.RevPktCount, fe.RevOctCount)
