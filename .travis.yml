@@ -1,8 +1,12 @@
 language: go
+go: 
+  - 1.8
+sudo: false
 
 before_install:
   - sudo apt-get -qq update
   - sudo apt-get install -y libpcap-dev
-
-go: 
-  - 1.8
+  - go get github.com/mattn/goveralls
+  
+script:
+  - $GOPATH/bin/goveralls -service=travis-ci
