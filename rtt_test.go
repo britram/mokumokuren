@@ -79,9 +79,11 @@ func TestRTTMeasurement(t *testing.T) {
 				{"2001:67c:370:128:10b8:6449:2dbf:4fc", "2a03:b0c0:3:d0::27a1:1", 61040, 443, 6}: ExpectedRTTMetrics{183653000, 188679000, 378764714, 7},
 			},
 		},
-		{"testdata/quicly.pcap",
+		{"testdata/bunchaquic.pcap",
 			ExpectedFlowRTTs{
-				{"127.0.0.1", "127.0.0.1", 53188, 4433, 17}: ExpectedRTTMetrics{1166000, 0, 0, 0},
+				{"31.133.128.140", "35.156.158.137", 52550, 4433, 17}:  ExpectedRTTMetrics{230483000, 0, 0, 0},
+				{"31.133.128.140", "139.162.123.134", 52551, 4433, 17}: ExpectedRTTMetrics{81776000, 0, 0, 0},
+				{"31.133.128.140", "133.242.206.244", 52552, 4433, 17}: ExpectedRTTMetrics{97955000, 0, 0, 0},
 			},
 		},
 	}

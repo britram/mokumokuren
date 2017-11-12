@@ -2,6 +2,7 @@ package mokumokuren
 
 import (
 	"encoding/binary"
+	"fmt"
 	"log"
 	"time"
 
@@ -35,6 +36,21 @@ type RTTData struct {
 	component [2]time.Duration
 	awaitTime [2]*time.Time
 	awaitVal  [2]uint32
+}
+
+func (d *RTTData) String() string {
+	if d.HandshakeRTT == 0 && d.RTTSampleCount == 0 {
+		return "(no RTT)"
+	} else if d.HandshakeRTT != 0 && d.RTTSampleCount == 0 {
+		return fmt.Sprintf("(hs RTT %.3f ms)",
+			float64(d.HandshakeRTT)/1000000)
+	} else if d.HandshakeRTT == 0 && d.RTTSampleCount != 0 {
+		return fmt.Sprintf("(min/mean RTT %.3f/%.3f ms)",
+			float64(d.MinimumRTT)/1000000, float64(d.MeanRTT)/1000000)
+	} else {
+		return fmt.Sprintf("(hs/min/mean RTT %.3f/%.3f/%.3f ms)",
+			float64(d.HandshakeRTT)/1000000, float64(d.MinimumRTT)/1000000, float64(d.MeanRTT)/1000000)
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////
@@ -156,9 +172,9 @@ func rttUDPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	// try to parse a quic header
 	var q QUICHeader
 	if err := q.ExtractFromUDP(udp); err != nil {
-		//if err != NotQUIC {
-		log.Printf("error parsing quic header: %s", err.Error())
-		//}
+		if err != NotQUIC {
+			log.Printf("error parsing quic header: %s", err.Error())
+		}
 		return true
 	}
 
@@ -178,5 +194,8 @@ func rttUDPPacket(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 func (ft *FlowTable) TrackRoundTripTime() {
 	ft.AddInitialFunction(rttInit)
 	ft.AddLayerFunction(rttTCPPacket, layers.LayerTypeTCP)
-	ft.AddLayerFunction(rttUDPPacket, layers.LayerTypeUDP)
+	if QUICPort != 0 {
+		// Only try to parse UDP when
+		ft.AddLayerFunction(rttUDPPacket, layers.LayerTypeUDP)
+	}
 }

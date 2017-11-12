@@ -15,7 +15,7 @@ import (
 
 func main() {
 	fileflag := flag.String("file", "-", "pcap file to read packets from")
-	quicportflag := flag.Uint("quic", 443, "UDP port to use for QUIC recognition")
+	quicportflag := flag.Uint("quic", 0, "UDP port to use for QUIC recognition")
 
 	// parse command line
 	flag.Parse()
@@ -46,10 +46,7 @@ func main() {
 	// add an emitter that prints flows including rtts
 	ft.AddEmitterFunction(func(fe *moku.FlowEntry) bool {
 		rttdata := fe.Data[moku.RTTDataIndex].(*moku.RTTData)
-		log.Printf("%s RTT %.3f/%.3f/%.3f", fe,
-			float64(rttdata.HandshakeRTT)/float64(1000000),
-			float64(rttdata.MinimumRTT)/float64(1000000),
-			float64(rttdata.MeanRTT)/float64(1000000))
+		log.Printf("%s %s", fe, rttdata)
 
 		return true
 	})

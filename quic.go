@@ -17,18 +17,10 @@ import (
 	"github.com/google/gopacket/layers"
 )
 
-//******************************************************************************
-//
-// QUIC Decoding Layer
-// ------------------------------------------
-// This file provides a GoPacket decoding layer for QUIC.
-// It follows the First Implementation Draft version of the protocol
-// as documented in draft-ietf-quic-protocol-04.
-//
-//******************************************************************************
-//
-
+// Constant error returned by ExtractFromUDP when the packet is not a QUIC packet
 var NotQUIC error
+
+// Constant error returned by ExtractFromUDP when the packet doesn't have enough bytes
 var QUICHeaderTruncated error
 
 func init() {
@@ -184,7 +176,7 @@ var quicKeyPhase = map[byte]int{
 	QUICPktTypeLongZeroRtt:          -1,
 }
 
-// A QUIC packet header or QUIC special packet
+// QUICHeader represents a QUIC packet header or QUIC special packet
 type QUICHeader struct {
 	PktType         byte   // packet type, not decoded
 	ConnID          uint64 // Connection ID
@@ -197,10 +189,10 @@ type QUICHeader struct {
 	Payload []byte
 }
 
-// Port to use for port-based QUIC recognition
-var QUICPort uint16 = 443
+// QUICPort if non-zero, enables port-based QUIC recognition.
+var QUICPort uint16 = 0
 
-// Set in order to snarf the measurement byte
+// MeasurementBytePresent if true, causes the QUICHeader parser to snarf a measurement byte.
 var MeasurementBytePresent bool = false
 
 func (q *QUICHeader) ExtractFromUDP(udp *layers.UDP) error {
