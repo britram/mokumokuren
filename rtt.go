@@ -75,16 +75,6 @@ func extractTimestamp(tcp *layers.TCP) (uint32, uint32, bool) {
 	return 0, 0, false
 }
 
-func wrapCompare(a, b uint32) int {
-	if a == b {
-		return 0
-	} else if ((a - b) & 0x80000000) > 0 {
-		return -1
-	} else {
-		return 1
-	}
-}
-
 func sampleRTT(d *RTTData) {
 	sample := d.component[0] + d.component[1]
 	if d.RTTSampleCount == 0 {

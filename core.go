@@ -318,7 +318,7 @@ func (ft *FlowTable) Shutdown() {
 
 	// Shut down the reapers
 	close(ft.tickChannel)
-	close(ft.reapChannel)
+	close(ft.reapChannel) // FIXME close race here
 
 	// and wait
 	_ = <-ft.reaperDone
@@ -326,17 +326,17 @@ func (ft *FlowTable) Shutdown() {
 
 func (ft *FlowTable) AddInitialFunction(fn PacketChainFn) {
 	ft.initialChain = append(ft.initialChain, fn)
-	log.Printf("initialChain now %v", ft.initialChain)
+	//log.Printf("initialChain now %v", ft.initialChain)
 }
 
 func (ft *FlowTable) AddLayerFunction(fn LayerChainFn, layerType gopacket.LayerType) {
 	ft.layerChain = append(ft.layerChain, layerChainEntry{layerType, fn})
-	log.Printf("layerChain now %v", ft.layerChain)
+	//log.Printf("layerChain now %v", ft.layerChain)
 }
 
 func (ft *FlowTable) AddEmitterFunction(fn FlowChainFn) {
 	ft.emitterChain = append(ft.emitterChain, fn)
-	log.Printf("emitterChain now %v", ft.emitterChain)
+	//log.Printf("emitterChain now %v", ft.emitterChain)
 }
 
 func (ft *FlowTable) flowEntry(key FlowKey) (fe *FlowEntry, rev bool) {
@@ -481,7 +481,7 @@ func (ft *FlowTable) reapFinishedFlowEntries() {
 		ft.activeLock.RUnlock()
 
 		if fe == nil {
-			log.Printf("**** duplicate reap of %v ****", k)
+			log.Printf("**** duplicate reap of %v ****", k) // FIXME this is an error, make it not happen.
 			continue
 		}
 
@@ -561,6 +561,16 @@ func (ft *FlowTable) CountPacketsAndOctets() {
 //
 ///////////////////////////////////////////////////////////////////////
 
+func wrapCompare(a, b uint32) int {
+	if a == b {
+		return 0
+	} else if ((a - b) & 0x80000000) > 0 {
+		return -1
+	} else {
+		return 1
+	}
+}
+
 func tcpFinStateTrack(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool {
 	tcp := layer.(*layers.TCP)
 	var fwd, rev int
@@ -581,7 +591,7 @@ func tcpFinStateTrack(fe *FlowEntry, pe *PacketEvent, layer gopacket.Layer) bool
 		fe.finseq[fwd] = tcp.Seq
 	}
 
-	if fe.finseen[rev] && tcp.ACK && tcp.Ack == fe.finseq[rev] {
+	if fe.finseen[rev] && tcp.ACK && wrapCompare(tcp.Ack, fe.finseq[rev]) >= 0 {
 		fe.finacked[rev] = true
 	}
 
