@@ -12,7 +12,8 @@ import (
 )
 
 const (
-    indexMeasurementByte = 17
+    indexMeasurementByteLong = 17  // long header
+    indexMeasurementByteShort = 13 // short header
 )
 
 const (
@@ -38,7 +39,7 @@ func setUpState(fe *FlowEntry, pe PacketEvent) bool {
 
     fe.Data[indexLastLatencySpinFWD] = -1
     fe.Data[indexLastLatencySpinTimeFWD] = packettime
-        fe.Data[indexLastLatencySpinREV] = -1
+    fe.Data[indexLastLatencySpinREV] = -1
     fe.Data[indexLastLatencySpinTimeREV] = packettime
 
     fmt.Printf("New Flow: Time: %.3fs\n",
@@ -53,7 +54,14 @@ func printMeasurementByte(fe *FlowEntry, pe PacketEvent, layer gopacket.Layer) b
 
     udp := layer.(*layers.UDP)
     payload := layer.LayerPayload()
-    measurement := payload[indexMeasurementByte]
+
+    var measurement uint8
+    if (payload[0] & (1 << 7)) != 0  {
+        measurement = payload[indexMeasurementByteLong]
+    } else {
+        measurement = payload[indexMeasurementByteShort]
+    }
+
     spin := (measurement & (0x01 << bitsetLatencySpin)) >> bitsetLatencySpin
 
     var indexLastLatencySpin, indexLastLatencySpinTime int
